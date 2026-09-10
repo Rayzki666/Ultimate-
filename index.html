@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0e0f12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="好好拍">
+<meta name="description" content="帮你把她拍好看，也帮你们俩重新有合照。">
+<title>好好拍</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/icon-180.png">
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+
+<!-- ── 取景教练 ───────────────────────────────────────── -->
+<section class="view" id="view-coach" data-view="coach">
+  <div class="camera-stage">
+    <video id="cam" playsinline muted autoplay></video>
+    <canvas id="overlay"></canvas>
+
+    <div class="cam-idle" id="camIdle">
+      <div class="cam-idle-inner">
+        <h1>取景教练</h1>
+        <p>打开取景框，实时告诉你机身歪没歪、俯仰角对不对、光是从哪边来的。</p>
+        <button class="btn btn-primary btn-lg" id="startCam">打开取景框</button>
+        <p class="fine">画面只在你手机里处理，不上传任何地方。</p>
+      </div>
+    </div>
+
+    <div class="cam-error" id="camError" hidden>
+      <p id="camErrorMsg"></p>
+      <button class="btn" id="retryCam">重试</button>
+    </div>
+
+    <!-- 抬头显示 -->
+    <div class="hud" id="hud" hidden>
+      <div class="hud-top">
+        <div class="chip" id="chipLevel"><span class="chip-k">水平</span><span class="chip-v">—</span></div>
+        <div class="chip" id="chipPitch"><span class="chip-k">俯仰</span><span class="chip-v">—</span></div>
+        <div class="chip" id="chipLight"><span class="chip-k">光</span><span class="chip-v">—</span></div>
+      </div>
+    </div>
+
+    <!-- 提示与「拍什么」叠在控制条之上，用 flex 排，免得绝对定位互相压住 -->
+    <div class="cam-stack" id="camStack" hidden>
+      <div class="coach-tip" id="coachTip" hidden>
+        <span class="coach-tip-icon" id="coachTipIcon"></span>
+        <span class="coach-tip-text" id="coachTipText"></span>
+      </div>
+      <div class="shot-types" id="shotTypes">
+        <button data-shot="full">全身</button>
+        <button data-shot="half" aria-pressed="true">半身</button>
+        <button data-shot="close">特写</button>
+        <button data-shot="duo">合照</button>
+      </div>
+    </div>
+
+    <!-- 底部相机控制条 -->
+    <div class="cam-bar" id="camBar" hidden>
+      <button class="cam-btn" id="btnGrid" aria-pressed="true">构图</button>
+      <button class="cam-btn" id="btnTilt">水平仪</button>
+      <label class="cam-btn cam-btn-shutter" id="btnShutter">
+        用系统相机拍
+        <input type="file" accept="image/*" capture="environment" id="nativeShot" hidden>
+      </label>
+      <button class="cam-btn" id="btnFlip">前后</button>
+      <button class="cam-btn" id="btnStop">关闭</button>
+    </div>
+  </div>
+
+  <div class="coach-help" id="coachHelp">
+    <details>
+      <summary>这个页面在看什么</summary>
+      <ul class="tight">
+        <li><b>水平</b>——机身左右歪了几度。地平线歪 2° 以上一眼就能看出来。</li>
+        <li><b>俯仰</b>——镜头是朝下还是朝上。拍脸和半身<b>略微俯拍</b>最好看；拍全身要<b>把手机放低</b>。</li>
+        <li><b>光</b>——顺光 / 侧光 / 逆光，以及过曝欠曝。逆光不是不能拍，是要知道自己在逆光。</li>
+        <li><b>构图框</b>——把她放在竖线上，别放正中间；头顶别留太多空；虚线是<b>关节切割警戒带</b>，画面下沿别正好切在膝盖、脚踝、手腕上。</li>
+      </ul>
+    </details>
+  </div>
+</section>
+
+<!-- ── 配方 ───────────────────────────────────────────── -->
+<section class="view" id="view-recipes" data-view="recipes" hidden>
+  <header class="vh">
+    <h1>拍摄配方</h1>
+    <p class="sub">先选你现在在哪儿。每张卡是一套能直接照做的动作。</p>
+  </header>
+  <div class="seg" id="recipeFilter"></div>
+  <div class="cards" id="recipeList"></div>
+</section>
+
+<!-- ── 话术 ───────────────────────────────────────────── -->
+<section class="view" id="view-cues" data-view="cues" hidden>
+  <header class="vh">
+    <h1>你该说什么</h1>
+    <p class="sub">「笑一个」是最没用的一句话。下面这些是有用的。</p>
+  </header>
+  <div class="cue-shuffle">
+    <button class="btn btn-primary" id="cueRandom">随机抽一句用</button>
+    <div class="cue-drawn" id="cueDrawn" hidden></div>
+  </div>
+  <div class="cards" id="cueList"></div>
+</section>
+
+<!-- ── 合照 ───────────────────────────────────────────── -->
+<section class="view" id="view-duo" data-view="duo" hidden>
+  <header class="vh">
+    <h1>两个人</h1>
+    <p class="sub">她说的其实是这件事：这几年没有你们俩的照片了。</p>
+  </header>
+
+  <div class="timer-card">
+    <div class="timer-display" id="timerDisplay">10</div>
+    <div class="timer-actions">
+      <button class="btn" data-timer="3">3 秒</button>
+      <button class="btn" data-timer="10">10 秒</button>
+      <button class="btn btn-primary" id="timerStart">开始倒数</button>
+    </div>
+    <p class="fine">倒数用的是声音和震动，你可以把手机架好之后背对着它跑位。</p>
+  </div>
+
+  <div class="cards" id="duoList"></div>
+</section>
+
+<!-- ── 选片 ───────────────────────────────────────────── -->
+<section class="view" id="view-review" data-view="review" hidden>
+  <header class="vh">
+    <h1>选片与复盘</h1>
+    <p class="sub">拍完导进来，看看这一批哪张能留，以及下次改什么。</p>
+  </header>
+
+  <label class="dropzone" id="dropzone">
+    <input type="file" accept="image/*" multiple id="reviewInput" hidden>
+    <span class="dz-title">选照片</span>
+    <span class="dz-sub">可以一次选一批。照片不会离开你的手机，除非你开了 AI 点评。</span>
+  </label>
+
+  <div class="checklist" id="localChecklist" hidden></div>
+  <div class="review-grid" id="reviewGrid"></div>
+</section>
+
+<!-- ── 她 ─────────────────────────────────────────────── -->
+<section class="view" id="view-her" data-view="her" hidden>
+  <header class="vh">
+    <h1>她的说明书</h1>
+    <p class="sub">与其猜，不如让她自己说。这份问卷是给她填的，三分钟。</p>
+  </header>
+
+  <div class="her-state" id="herState"></div>
+
+  <div class="survey" id="survey" hidden></div>
+
+  <div class="settings">
+    <details>
+      <summary>AI 点评（可选）</summary>
+      <div class="settings-body">
+        <p class="fine">
+          填入你自己的 Anthropic API Key 就能用 Claude 看照片给意见。Key 只存在这台设备的浏览器里，
+          请求直接从你手机发到 Anthropic，不经过任何中间服务器。不填也不影响前面所有功能。
+        </p>
+        <label class="field">
+          <span>API Key</span>
+          <input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+        <div class="row">
+          <button class="btn btn-primary" id="saveKey">保存</button>
+          <button class="btn btn-ghost" id="clearKey">清除</button>
+          <span class="key-status" id="keyStatus"></span>
+        </div>
+      </div>
+    </details>
+    <details>
+      <summary>关于与数据</summary>
+      <div class="settings-body">
+        <p class="fine">
+          「好好拍」是一个纯前端网页应用，没有服务器、没有账号、不收集任何数据。
+          问卷答案和偏好档案存在你手机浏览器的本地存储里。清除浏览器数据会一并清掉。
+        </p>
+        <button class="btn btn-ghost" id="exportData">导出我的数据</button>
+        <button class="btn btn-ghost" id="wipeData">清空全部数据</button>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ── 底部导航 ───────────────────────────────────────── -->
+<nav class="tabbar" id="tabbar">
+  <button class="tab" data-go="coach" aria-current="true"><span class="ti" aria-hidden="true">◎</span>取景</button>
+  <button class="tab" data-go="recipes"><span class="ti" aria-hidden="true">▤</span>配方</button>
+  <button class="tab" data-go="cues"><span class="ti" aria-hidden="true">“︎</span>话术</button>
+  <button class="tab" data-go="duo"><span class="ti" aria-hidden="true">◐</span>合照</button>
+  <button class="tab" data-go="review"><span class="ti" aria-hidden="true">✓</span>选片</button>
+  <button class="tab" data-go="her"><span class="ti" aria-hidden="true">♡</span>她</button>
+</nav>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>
