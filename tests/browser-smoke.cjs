@@ -24,12 +24,13 @@ const server = http.createServer((req, res) => {
   const url = 'http://127.0.0.1:' + server.address().port;
   fs.mkdirSync(path.join(root, 'test-results'), { recursive: true });
   const browser = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--use-gl=angle', '--use-angle=swiftshader', '--enable-webgl'] });
+  let page;
   try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, permissions: ['camera'] });
     await context.addInitScript(() => localStorage.setItem('haohaopai:prefs', JSON.stringify({ track: false, tilt: false, voice: false, grid: true })));
-    const page = await context.newPage();
+    page = await context.newPage();
     const errors = [];
-    page.on('pageerror', error => errors.push(error.message));
+    page.on('pageerror', error => { errors.push(error.message); console.error('PAGE ERROR:', error.message); });
     await page.goto(url + '/#debug');
     await page.waitForFunction(() => window.__coach);
     await page.screenshot({ path: 'test-results/camera-welcome.png', fullPage: true });
@@ -59,6 +60,7 @@ const server = http.createServer((req, res) => {
     });
     await page.waitForFunction(() => window.__coach.ready);
     assert.equal(await page.locator('#coachTipText').innerText(), '现在可以拍');
+    await page.waitForFunction(() => document.querySelector('#toast').hidden);
     await page.screenshot({ path: 'test-results/camera-ready.png', fullPage: true });
 
     const frame = await page.locator('.camera-preview').boundingBox();
@@ -73,9 +75,11 @@ const server = http.createServer((req, res) => {
     await page.waitForSelector('#reviewGrid .shot img');
     assert.equal(await page.locator('#reviewGrid .shot').count(), 1);
     assert.equal(await page.evaluate(() => window.__coach.running), false);
-    const download = page.waitForEvent('download');
-    await page.getByRole('button', { name: '保存照片', exact: true }).click();
-    const saved = await download;
+    await page.screenshot({ path: 'test-results/camera-review.png', fullPage: true });
+    const [saved] = await Promise.all([
+      page.waitForEvent('download', { timeout: 45000 }),
+      page.getByRole('button', { name: '保存照片', exact: true }).click({ timeout: 15000 }),
+    ]);
     const filepath = await saved.path();
     const bytes = fs.readFileSync(filepath);
     assert.equal(bytes[0], 0xff);
@@ -98,5 +102,11 @@ const server = http.createServer((req, res) => {
     assert.deepEqual(errors, []);
     console.log('Browser smoke passed: bundled model, readiness UI, capture/download, navigation, phone layouts, cleanup.');
     await context.close();
+  } catch (error) {
+    if (page) {
+      await page.screenshot({ path: 'test-results/camera-failure.png', fullPage: true }).catch(() => {});
+      console.error(await page.locator('#reviewGrid').innerText().catch(() => 'review unavailable'));
+    }
+    throw error;
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); server.close(); process.exitCode = 1; });
