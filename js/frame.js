@@ -13,15 +13,19 @@ export class FrameReader {
 
   /**
    * @param {HTMLVideoElement|HTMLImageElement|HTMLCanvasElement} source
+   * @param {null|{sx:number,sy:number,sw:number,sh:number}} crop
+   *   只分析源图里的这一块。取景时 <video> 是 object-fit: cover，
+   *   屏幕上看到的只是视频中间一块——判断曝光要按看得见的那块算。
    * @returns {null | object} 亮度统计，画面还没准备好时返回 null
    */
-  read(source) {
+  read(source, crop = null) {
     const sw = source.videoWidth || source.naturalWidth || source.width;
     const sh = source.videoHeight || source.naturalHeight || source.height;
     if (!sw || !sh) return null;
 
     try {
-      this.ctx.drawImage(source, 0, 0, W, H);
+      if (crop) this.ctx.drawImage(source, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, W, H);
+      else this.ctx.drawImage(source, 0, 0, W, H);
     } catch {
       return null; // 跨域画布被污染
     }
@@ -86,35 +90,99 @@ export class FrameReader {
       sideBias: right - left,      // 正数表示光从右边来
     };
   }
+  /**
+   * 指定区域的平均亮度。知道脸在哪之后，用它和全画面比，
+   * 判逆光比「中心对外圈」准得多——人不一定站在正中间。
+   * @param {{sx:number,sy:number,sw:number,sh:number}} rect 源图像素坐标
+   * @returns {number|null} 0..255
+   */
+  readRegion(source, rect) {
+    const N = 16;
+    if (!rect || rect.sw <= 0 || rect.sh <= 0) return null;
+    if (!this._rc) {
+      this._rc = document.createElement('canvas');
+      this._rc.width = N; this._rc.height = N;
+      this._rctx = this._rc.getContext('2d', { willReadFrequently: true });
+    }
+    let data;
+    try {
+      this._rctx.drawImage(source, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, N, N);
+      data = this._rctx.getImageData(0, 0, N, N).data;
+    } catch {
+      return null;
+    }
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      sum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+    }
+    return sum / (N * N);
+  }
+}
+
+/** <video> 用 object-fit: cover 时，屏幕上实际显示的是源图里的哪一块。 */
+export function coverRect(video, boxW, boxH) {
+  const vw = video.videoWidth || 1, vh = video.videoHeight || 1;
+  const scale = Math.max(boxW / vw, boxH / vh);
+  const sw = boxW / scale, sh = boxH / scale;
+  return { sx: (vw - sw) / 2, sy: (vh - sh) / 2, sw, sh };
+}
+
+/** 屏幕内归一化的方框 → 源图像素方框，喂给 readRegion。 */
+export function regionFromBox(box, crop) {
+  const x0 = Math.max(0, Math.min(1, box.x0)), x1 = Math.max(0, Math.min(1, box.x1));
+  const y0 = Math.max(0, Math.min(1, box.y0)), y1 = Math.max(0, Math.min(1, box.y1));
+  if (x1 <= x0 || y1 <= y0) return null;
+  return {
+    sx: crop.sx + x0 * crop.sw,
+    sy: crop.sy + y0 * crop.sh,
+    sw: (x1 - x0) * crop.sw,
+    sh: (y1 - y0) * crop.sh,
+  };
 }
 
 /**
  * 把统计数字翻译成人话。
  * @returns {{exposure:object, light:object, notes:string[]}}
  */
-export function interpret(stats) {
+export function interpret(stats, faceLuma = null) {
   const notes = [];
 
   // ── 曝光 ──
   let exposure;
   if (stats.mean < 42) {
-    exposure = { level: 'bad', label: '太暗', tip: '光不够。找个有光的地方，或者让她靠近窗户、路灯、橱窗。' };
+    exposure = { level: 'bad', label: '太暗', tip: '光不够。找个有光的地方，或者让她靠近窗户、路灯、橱窗。', voice: '太暗了，去找光' };
   } else if (stats.clipHigh > 0.16) {
-    exposure = { level: 'bad', label: '过曝', tip: '亮部已经死白了。点一下屏幕上她的脸对焦，然后手指往下滑降低曝光。' };
+    exposure = { level: 'bad', label: '过曝', tip: '亮部已经死白了。点一下屏幕上她的脸对焦，然后手指往下滑降低曝光。', voice: '过曝了，往下滑降曝光' };
   } else if (stats.mean > 196) {
-    exposure = { level: 'warn', label: '偏亮', tip: '整体偏亮，往下滑一点曝光会更耐看。' };
+    exposure = { level: 'warn', label: '偏亮', tip: '整体偏亮，往下滑一点曝光会更耐看。', voice: '偏亮，降一点曝光' };
   } else if (stats.mean < 70) {
-    exposure = { level: 'warn', label: '偏暗', tip: '有点暗。手机会自动提高感光度，画面会发糊有噪点——找点光。' };
+    exposure = { level: 'warn', label: '偏暗', tip: '有点暗。手机会自动提高感光度，画面会发糊有噪点——找点光。', voice: '有点暗，找点光' };
   } else {
     exposure = { level: 'good', label: '正常', tip: '' };
   }
 
   // ── 光位 ──
+  // 认出人之后就用「她脸上的光」对比整个画面，比拿画面中心当主体准得多。
+  const faceGap = faceLuma === null ? null : stats.mean - faceLuma;
+
   let light;
-  if (stats.backlit > 42 && stats.outer > 118) {
+  if (faceGap !== null && faceGap > 34 && stats.mean > 108) {
+    light = {
+      level: 'warn', label: '逆光',
+      tip: '她脸比背景暗一大截。点她的脸对焦测光——背景会过曝，但人是对的。',
+      voice: '逆光，点她的脸测光',
+    };
+  } else if (faceGap !== null && faceGap < -46 && faceLuma > 224) {
+    light = {
+      level: 'warn', label: '脸过曝',
+      tip: '光太直接了，她脸上已经死白。让她转开一点，或者挪到阴影边缘。',
+      voice: '脸过曝了，往阴影里挪',
+    };
+  } else if (faceGap === null && stats.backlit > 42 && stats.outer > 118) {
     light = {
       level: 'warn', label: '逆光',
       tip: '逆光。要么点她的脸对焦测光（背景会过曝，但人是对的），要么就干脆拍剪影和发丝光。',
+      voice: '逆光，点她的脸测光',
     };
   } else if (Math.abs(stats.sideBias) > 24) {
     const side = stats.sideBias > 0 ? '右' : '左';

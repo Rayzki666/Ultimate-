@@ -43,9 +43,24 @@ async function go(name) {
 $$('.tab').forEach(t => t.addEventListener('click', () => { buzz(10); go(t.dataset.go); }));
 
 // ── 取景页 ────────────────────────────────────────────
+function syncCamButtons() {
+  $('#btnGrid').setAttribute('aria-pressed', String(coach.showGrid));
+  $('#btnTilt').setAttribute('aria-pressed', String(coach.tilt.active));
+  $('#btnTrack').setAttribute('aria-pressed', String(coach.tracker.ready));
+  $('#btnVoice').setAttribute('aria-pressed', String(coach.voice.enabled));
+}
+
 $('#startCam').addEventListener('click', async () => {
+  // 语音必须在用户手势里先「开个口」，iOS 之后才允许程序触发
+  coach.voice.unlock();
   const ok = await coach.start();
-  if (ok && store.prefs.tilt !== false) await coach.enableTilt();
+  if (!ok) return;
+  if (store.prefs.tilt !== false) await coach.enableTilt();
+  syncCamButtons();
+  if (!coach.tracker.ready && !store.prefs.trackAsked) {
+    const prefs = store.prefs; prefs.trackAsked = true; store.prefs = prefs;
+    toast('点下面的「认人」，它就能自动看构图和关节切割了。', 4200);
+  }
 });
 $('#retryCam').addEventListener('click', () => {
   $('#camError').hidden = true;
@@ -65,6 +80,24 @@ $('#btnTilt').addEventListener('click', async (e) => {
     const ok = await coach.enableTilt();
     e.currentTarget.setAttribute('aria-pressed', String(ok));
   }
+});
+
+$('#btnTrack').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  if (coach.tracker.ready) {
+    coach.disableTracking();
+    btn.setAttribute('aria-pressed', 'false');
+    toast('关了自动认人。点一下画面里她头的位置也能用。');
+    return;
+  }
+  btn.disabled = true;
+  const ok = await coach.enableTracking();
+  btn.disabled = false;
+  btn.setAttribute('aria-pressed', String(ok));
+});
+
+$('#btnVoice').addEventListener('click', (e) => {
+  e.currentTarget.setAttribute('aria-pressed', String(coach.toggleVoice()));
 });
 
 $$('#shotTypes button').forEach(b => {
@@ -235,5 +268,8 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => { /* 离线缓存失败不影响使用 */ });
   });
 }
+
+// 加 #debug 打开调试入口：在控制台里可以直接摆弄取景教练的状态。
+if (location.hash === '#debug') window.__coach = coach;
 
 export { coach, SHOT_TYPES };

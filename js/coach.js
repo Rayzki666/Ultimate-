@@ -1,29 +1,46 @@
-// 取景教练：把陀螺仪和画面分析合成「此刻最该改的那一件事」。
+// 取景教练：一边看着取景框，一边告诉你此刻最该改的那一件事。
 //
-// 设计上只显示一条提示。拍照的时候人没空读列表，给三条等于没给。
+// 三层输入：
+//   陀螺仪  → 机身歪没歪、镜头是俯是仰
+//   像素    → 曝光、光位（认出人之后用她脸上的光，不是画面中心的光）
+//   关键点  → 她在画面哪儿、头顶留白、画面下沿有没有切在关节上
+//
+// 只显示一条。拍照的时候人没空读列表，给三条等于没给。
+// 开了语音就把这条念出来——眼睛应该在她身上，不是在手机屏幕上。
 
 import { $, toast, buzz } from './ui.js';
 import { Tilt } from './sensors.js';
-import { FrameReader, interpret } from './frame.js';
+import { FrameReader, interpret, coverRect, regionFromBox } from './frame.js';
+import { SubjectTracker, readSubject, drawSkeleton, coverMapper } from './vision.js';
+import { Voice, shorten } from './speak.js';
 import { store } from './store.js';
 
 const SHOT_TYPES = {
   full:  { label: '全身', lo: -4, hi:  5,
            over:  '手机放低到腰这么高。现在是俯拍，腿会显短一截。',
-           under: '仰得太狠了，身体会往后倒。' },
+           overV: '手机放低一点',
+           under: '仰得太狠了，身体会往后倒。',
+           underV: '别仰这么多' },
   half:  { label: '半身', lo:  1, hi: 11,
            over:  '俯得有点多，会显头大身子小。收一点。',
-           under: '别从下往上拍——下巴和鼻孔会很明显。镜头抬到比她眼睛略高。' },
+           overV: '俯得太多了',
+           under: '别从下往上拍——下巴和鼻孔会很明显。镜头抬到比她眼睛略高。',
+           underV: '抬高一点，别仰拍' },
   close: { label: '特写', lo:  4, hi: 17,
            over:  '太俯了，额头会变大。',
-           under: '抬高一点，比她眼睛高一点点再往下拍，脸会小、眼睛会大。' },
+           overV: '俯得太多了',
+           under: '抬高一点，比她眼睛高一点点再往下拍，脸会小、眼睛会大。',
+           underV: '抬到比她眼睛高一点' },
   duo:   { label: '合照', lo: -3, hi:  8,
            over:  '手机架高了，两个人都会显矮。放到胸口高度。',
-           under: '仰拍两个人容易显下巴，平一点。' },
+           overV: '手机放低到胸口高度',
+           under: '仰拍两个人容易显下巴，平一点。',
+           underV: '平一点' },
 };
 
 const ROLL_TOLERANCE = 2.4;   // 歪超过这个度数就提醒，2° 以上肉眼能看出来
 const TIP_HOLD_MS    = 900;   // 提示至少停留这么久，避免抖来抖去
+const DETECT_HZ      = 12;    // 关键点检测频率。再高对判断没帮助，只费电
 
 export class Coach {
   constructor() {
@@ -32,18 +49,23 @@ export class Coach {
     this.octx     = this.overlay.getContext('2d');
     this.tilt     = new Tilt();
     this.reader   = new FrameReader();
+    this.tracker  = new SubjectTracker();
+    this.voice    = new Voice();
 
     this.stream   = null;
     this.facing   = 'environment';
     this.running  = false;
     this.shotType = 'half';
     this.showGrid = store.prefs.grid !== false;
-    this.head     = null;        // 用户点过的「她的头在这」
+    this.head     = null;        // 没开自动认人时，手动点的位置
     this.stats    = null;
     this.reading  = null;
+    this.subjects = [];
+    this.ready    = false;
 
     this._raf = null;
     this._statTimer = null;
+    this._lastDetect = 0;
     this._tip = { key: null, since: 0, shown: null };
 
     this.overlay.style.pointerEvents = 'auto';
@@ -78,6 +100,8 @@ export class Coach {
     }
 
     this.video.srcObject = this.stream;
+    // 前置画面镜像，跟人照镜子的直觉一致；分析时会把 x 一并翻回来
+    this.video.style.transform = this.facing === 'user' ? 'scaleX(-1)' : '';
     try { await this.video.play(); } catch { /* iOS 偶尔要等一拍 */ }
 
     $('#camIdle').hidden = true;
@@ -89,6 +113,8 @@ export class Coach {
 
     this.running = true;
     if (store.prefs.tilt !== false) this.tilt.start();
+    if (store.prefs.voice !== false) this._setVoice(true);
+    if (store.prefs.track) this.enableTracking();
 
     this._loop();
     this._statTimer = setInterval(() => this._sample(), 220);
@@ -100,16 +126,20 @@ export class Coach {
     cancelAnimationFrame(this._raf);
     clearInterval(this._statTimer);
     this.tilt.stop();
+    this.voice.stop();
     this.stream?.getTracks().forEach(t => t.stop());
     this.stream = null;
     this.video.srcObject = null;
     this.head = null;
+    this.subjects = [];
+    this.ready = false;
     this._tip = { key: null, since: 0, shown: null };
     $('#camIdle').hidden = false;
     $('#hud').hidden = true;
     $('#camBar').hidden = true;
     $('#camStack').hidden = true;
     document.body.classList.remove('cam-on');
+    $('#cameraStage')?.classList.remove('is-ready');
     this.octx.clearRect(0, 0, this.overlay.width, this.overlay.height);
   }
 
@@ -136,6 +166,38 @@ export class Coach {
     return ok;
   }
 
+  /** 自动认人。模型要从 CDN 下，所以是按需加载，失败就退回点一下的老路子。 */
+  async enableTracking() {
+    if (this.tracker.ready) return true;
+    const ok = await this.tracker.load(msg => toast(msg, 2600));
+    const prefs = store.prefs; prefs.track = ok; store.prefs = prefs;
+    if (ok) {
+      this.head = null;   // 认得出人了，手动标记就不需要了
+      toast('认出人了。构图、留白、关节切割现在都自动看。', 3400);
+    } else {
+      toast('识别模型没加载成功（' + (this.tracker.error || '网络问题') + '）。点一下画面里她头的位置也一样能用。', 5000);
+    }
+    return ok;
+  }
+
+  disableTracking() {
+    this.tracker.dispose();
+    this.subjects = [];
+    const prefs = store.prefs; prefs.track = false; store.prefs = prefs;
+  }
+
+  _setVoice(on) {
+    const enabled = this.voice.toggle(on);
+    const prefs = store.prefs; prefs.voice = enabled; store.prefs = prefs;
+    if (enabled && !this.voice.supported) {
+      toast('这个浏览器不支持语音播报。');
+      return false;
+    }
+    return enabled;
+  }
+
+  toggleVoice() { return this._setVoice(!this.voice.enabled); }
+
   setShotType(type) {
     if (SHOT_TYPES[type]) this.shotType = type;
   }
@@ -146,17 +208,51 @@ export class Coach {
     return this.showGrid;
   }
 
-  // ── 采样与判断 ──────────────────────────────────────
+  // ── 采样 ────────────────────────────────────────────
+  get _box() {
+    return { w: this.overlay.clientWidth || 1, h: this.overlay.clientHeight || 1 };
+  }
+
   _sample() {
     if (!this.running) return;
-    const stats = this.reader.read(this.video);
+    const { w, h } = this._box;
+    const crop = coverRect(this.video, w, h);
+
+    const stats = this.reader.read(this.video, crop);
     if (stats) {
+      // 认出人就用她脸上的光判逆光，比拿画面中心当主体准得多
+      let faceLuma = null;
+      const s0 = this.subjects[0];
+      if (s0?.face) {
+        const rect = regionFromBox(s0.face, crop);
+        if (rect) faceLuma = this.reader.readRegion(this.video, rect);
+      }
       this.stats = stats;
-      this.reading = interpret(stats);
+      this.reading = interpret(stats, faceLuma);
     }
     this._updateHud();
   }
 
+  _detect(now) {
+    if (!this.tracker.ready || now - this._lastDetect < 1000 / DETECT_HZ) return;
+    this._lastDetect = now;
+
+    const raw = this.tracker.detect(this.video, now);
+    if (!raw) { this.subjects = []; return; }
+
+    const { w, h } = this._box;
+    const map = coverMapper(this.video, w, h, this.facing === 'user');
+    this.subjects = raw
+      .map(pts => {
+        const mapped = pts.map(p => ({ ...map(p), z: p.z, visibility: p.visibility }));
+        const s = readSubject(mapped);
+        return s ? { ...s, pts: mapped } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => area(b.box) - area(a.box));
+  }
+
+  // ── 抬头显示 ────────────────────────────────────────
   _updateHud() {
     const t = this.tilt.read();
     const r = this.reading;
@@ -191,47 +287,179 @@ export class Coach {
               : r.exposure.level === 'warn' || r.light.level === 'warn' ? 'warn' : 'good');
     }
 
+    const chipS = $('#chipSubject');
+    if (this.tracker.ready) {
+      const n = this.subjects.length;
+      chipS.hidden = false;
+      setChip('#chipSubject', n === 0 ? '没看到人' : n === 1 ? '认到 1 人' : `认到 ${n} 人`,
+              n === 0 ? 'warn' : 'good');
+    } else {
+      chipS.hidden = true;
+    }
+
     this._pickTip(t, r);
   }
 
-  /** 按优先级挑一条，并加迟滞避免闪烁。 */
+  /** 按「有多毁照片」排序，只挑最靠前的那一条。 */
   _pickTip(t, r) {
     const spec = SHOT_TYPES[this.shotType];
+    const subj = this.subjects[0];
     let tip = null;
 
+    const T = (key, sev, icon, text, voice) => ({ key, sev, icon, text, voice: voice || shorten(text) });
+
+    // 1. 曝光崩了——照片直接废
     if (r && r.exposure.level === 'bad') {
-      tip = { key: 'exp-bad', sev: 'bad', icon: '◐', text: r.exposure.tip };
-    } else if (r && r.light.label === '逆光') {
-      tip = { key: 'backlit', sev: 'warn', icon: '☀', text: r.light.tip };
-    } else if (t && t.rollValid && Math.abs(t.roll) > ROLL_TOLERANCE) {
+      tip = T('exp-bad', 'bad', '◐', r.exposure.tip, r.exposure.voice);
+    }
+    // 2. 脸上的光没了
+    else if (r && (r.light.label === '逆光' || r.light.label === '脸过曝')) {
+      tip = T('light-bad', 'warn', '☀', r.light.tip, r.light.voice);
+    }
+    // 3. 画面下沿切在关节上——构图硬伤，而且小屏幕上很难当场发现
+    else if (subj?.crop) {
+      tip = T('crop-' + subj.crop.at, 'bad', '✂',
+              subj.crop.text,
+              { ankle: '切在脚踝上了', knee: '切在膝盖上了',
+                wrist: '切在手腕上了', foot: '脚尖切掉了' }[subj.crop.at]);
+    }
+    // 4. 机身歪
+    else if (t && t.rollValid && Math.abs(t.roll) > ROLL_TOLERANCE) {
       const dir = t.roll > 0 ? '左' : '右';
-      tip = { key: 'roll', sev: Math.abs(t.roll) > 5 ? 'bad' : 'warn', icon: '⊹',
-              text: `歪了 ${Math.abs(t.roll).toFixed(1)}°，往${dir}边掰回来一点。` };
-    } else if (t && t.pitch > spec.hi + 2) {
-      tip = { key: 'pitch-over', sev: 'warn', icon: '↓', text: spec.over };
+      tip = T('roll', Math.abs(t.roll) > 5 ? 'bad' : 'warn', '⊹',
+              `歪了 ${Math.abs(t.roll).toFixed(1)}°，往${dir}边掰回来一点。`,
+              `往${dir}掰一点`);
+    }
+    // 5. 俯仰角
+    else if (t && t.pitch > spec.hi + 2) {
+      tip = T('pitch-over', 'warn', '↓', spec.over, spec.overV);
     } else if (t && t.pitch < spec.lo - 2) {
-      tip = { key: 'pitch-under', sev: 'warn', icon: '↑', text: spec.under };
-    } else if (this.head) {
-      const h = this._headAdvice();
-      if (h) tip = h;
+      tip = T('pitch-under', 'warn', '↑', spec.under, spec.underV);
+    }
+    // 6～9. 认出人之后才有的判断
+    else if (subj) {
+      tip = this._subjectTip(subj);
+    }
+    // 没开自动认人时的退路：手动标记
+    else if (this.head) {
+      tip = this._headTip();
     }
 
     if (!tip && r && r.exposure.level === 'warn') {
-      tip = { key: 'exp-warn', sev: 'warn', icon: '◐', text: r.exposure.tip };
-    }
-    if (!tip && r && r.light.tip) {
-      tip = { key: 'light-ok', sev: 'good', icon: '☀', text: r.light.tip };
+      tip = T('exp-warn', 'warn', '◐', r.exposure.tip, r.exposure.voice);
     }
     if (!tip && r && r.notes.length) {
-      tip = { key: 'note', sev: 'good', icon: '·', text: r.notes[0] };
-    }
-    if (!tip) {
-      tip = { key: 'clear', sev: 'good', icon: '✓',
-              text: this.head
-                ? '构图、光、角度都过了。剩下的是表情——去「话术」抽一句说给她听。'
-                : '光和角度都没问题。点一下画面里她头的位置，我再帮你看构图。' };
+      tip = T('note', 'good', '·', r.notes[0]);
     }
 
+    // 什么都没挑出来 = 可以按了。
+    // 但前提是我们确实知道她在哪儿——没认出人、也没点过位置的时候，
+    // 「可以按了」是一句没有根据的话，不能说。
+    const wasReady = this.ready;
+    this.ready = !tip && (Boolean(subj) || Boolean(this.head));
+
+    if (!tip) {
+      tip = this.ready
+        ? T('ready', 'ready', '●', '可以按了。', '可以按了')
+        : this.tracker.ready
+          ? T('nobody', 'good', '◌', '还没看到人。让她走进画面，或者退后一点。', '还没看到人')
+          : T('clear', 'good', '✓',
+              '光和角度都没问题。想让它自动看构图，点下面的「认人」。',
+              '');
+    }
+
+    this._showTip(tip, wasReady);
+  }
+
+  _subjectTip(s) {
+    const T = (key, sev, icon, text, voice) => ({ key, sev, icon, text, voice: voice || shorten(text) });
+    const boxH = s.box ? s.box.y1 - s.box.y0 : 0;
+
+    // 头顶
+    if (s.headTop < 0.015 && this.shotType !== 'close') {
+      return T('head-crop', 'warn', '↕', '头快出画了，镜头往上抬一点。', '镜头抬一点');
+    }
+    if (s.headTop > 0.28 && this.shotType !== 'full') {
+      return T('headroom', 'warn', '↕',
+               '头顶上面空太多了。手机往下压，或者你蹲下来一点——她会立刻变高。',
+               '头顶空太多，手机往下压');
+    }
+
+    // 想拍全身却看不到脚
+    if (this.shotType === 'full' && !s.visible.ankles && s.visible.hips) {
+      return T('not-full', 'warn', '⤢',
+               '这个框拍不到全身。退后两步，或者把手机放低到腰的高度再往回收。',
+               '退后两步，拍不到全身');
+    }
+    // 太小 / 顶天立地
+    if (boxH > 0 && boxH < 0.42) {
+      return T('too-far', 'warn', '⤢',
+               '她在画面里太小了。走近两步，或者变焦到 2x——别用 0.5x。',
+               '太远了，走近点');
+    }
+    if (boxH > 0.985 && this.shotType !== 'close') {
+      return T('too-tight', 'warn', '⤢', '顶天立地了，退半步给她留点余地。', '退半步');
+    }
+    if (this.shotType === 'close' && s.face && (s.face.x1 - s.face.x0) < 0.19) {
+      return T('close-far', 'warn', '⤢',
+               '特写要够近。退后两步，然后拉到 3x——退后变焦比走近拍好看。',
+               '拉到三倍变焦');
+    }
+
+    // 站位
+    const x = s.head.x;
+    const offCenter = Math.abs(x - 0.5);
+    const nearThird = Math.min(Math.abs(x - 1 / 3), Math.abs(x - 2 / 3));
+    if (offCenter < 0.06 && this.shotType !== 'close' && this.shotType !== 'duo') {
+      const dir = x <= 0.5 ? '左' : '右';
+      return T('centered', 'warn', '⊞',
+               `她正好在画面正中间。手机往${dir === '左' ? '右' : '左'}转一点，把她挪到竖线上。`,
+               `她在正中间，挪到竖线上`);
+    }
+    if (x < 0.08 || x > 0.92) {
+      return T('edge', 'warn', '⊞', '她快贴到画面边上了，往中间带一点。', '太靠边了');
+    }
+
+    // 合照：两个人之间的缝
+    if (this.shotType === 'duo' && this.subjects.length >= 2) {
+      const [a, b] = this.subjects;
+      const gap = Math.abs(a.head.x - b.head.x);
+      const scale = (a.headScale + b.headScale) / 2 || 0.1;
+      if (gap > scale * 3.2) {
+        return T('duo-gap', 'warn', '◐',
+                 '你们俩中间有缝。靠近到肩膀挨着——有缝的合照看着像同事。',
+                 '靠近一点，中间有缝');
+      }
+    }
+
+    // 体态。这两条是建议不是纠错，所以放在最后。
+    if (s.shoulderTilt !== null && Math.abs(s.shoulderTilt) > 9) {
+      return T('shoulders', 'good', '⌐',
+               '她一边肩膀明显高。提醒一句「肩膀往后、往下沉」就好。',
+               '让她肩膀沉一下');
+    }
+    if (s.squareness !== null && s.squareness > 2.25 && this.shotType !== 'duo') {
+      return T('square', 'good', '↻',
+               '她正面直对着镜头，这是最显宽的角度。让她身体转 45 度，脸转回来。',
+               '让她身体转四十五度');
+    }
+    if (nearThird < 0.06) return null;   // 站位已经对了，没什么可说的
+    return null;
+  }
+
+  _headTip() {
+    const { x, y } = this.head;
+    const T = (key, sev, icon, text) => ({ key, sev, icon, text, voice: shorten(text) });
+    if (y > 0.36) return T('headroom', 'warn', '↕', '头顶上面空太多了。手机往下压，或者你蹲下来一点——她会立刻变高。');
+    if (y < 0.05) return T('headcrop', 'warn', '↕', '头快出画了，镜头抬一点。');
+    if (Math.abs(x - 0.5) < 0.07 && this.shotType !== 'close') {
+      return T('centered', 'warn', '⊞', '她正好在画面正中间。往左或往右挪到竖线上，同一张照片会好看很多。');
+    }
+    return null;
+  }
+
+  /** 迟滞：新提示要稳住一会儿才换，除非严重程度升级了。 */
+  _showTip(tip, wasReady) {
     const now = performance.now();
     if (tip.key !== this._tip.key) {
       this._tip = { key: tip.key, since: now, shown: this._tip.shown };
@@ -239,7 +467,7 @@ export class Coach {
     const held = now - this._tip.since;
     const escalating = tip.sev === 'bad' && this._tip.shown?.sev !== 'bad';
     if (this._tip.shown && tip.key !== this._tip.shown.key && held < TIP_HOLD_MS && !escalating) {
-      tip = this._tip.shown; // 还没稳住，先不换
+      tip = this._tip.shown;
     } else {
       this._tip.shown = tip;
     }
@@ -249,31 +477,19 @@ export class Coach {
     box.className = 'coach-tip sev-' + tip.sev;
     $('#coachTipIcon').textContent = tip.icon;
     $('#coachTipText').textContent = tip.text;
-  }
 
-  _headAdvice() {
-    const { x, y } = this.head;
-    if (y > 0.36) {
-      return { key: 'headroom', sev: 'warn', icon: '↕',
-               text: '头顶上面空太多了。手机往下压，或者你蹲下来一点——她会立刻变高。' };
+    const stage = this.video.closest('.camera-stage');
+    stage?.classList.toggle('is-ready', this.ready);
+    if (this.ready && !wasReady) {
+      buzz([25, 45, 25]);
+      this.voice.say('可以按了', { force: true });
+    } else if (!this.ready && tip.sev !== 'good' && tip.voice) {
+      this.voice.say(tip.voice);
     }
-    if (y < 0.05) {
-      return { key: 'headcrop', sev: 'warn', icon: '↕', text: '头快出画了，镜头抬一点。' };
-    }
-    const offCenter = Math.abs(x - 0.5);
-    const nearThird = Math.min(Math.abs(x - 1 / 3), Math.abs(x - 2 / 3));
-    if (offCenter < 0.07 && this.shotType !== 'close') {
-      return { key: 'centered', sev: 'warn', icon: '⊞',
-               text: '她正好在画面正中间。往左或往右挪到竖线上，同一张照片会好看很多。' };
-    }
-    if (nearThird < 0.06) {
-      return { key: 'thirds', sev: 'good', icon: '✓', text: '构图站位对了。可以按了。' };
-    }
-    return null;
   }
 
   _markHead(e) {
-    if (!this.running) return;
+    if (!this.running || this.tracker.ready) return;   // 认得出人就不用手动点了
     const rect = this.overlay.getBoundingClientRect();
     this.head = {
       x: (e.clientX - rect.left) / rect.width,
@@ -286,6 +502,8 @@ export class Coach {
   // ── 叠加层 ──────────────────────────────────────────
   _loop() {
     if (!this.running) return;
+    const now = performance.now();
+    this._detect(now);
     this._draw();
     this._raf = requestAnimationFrame(() => this._loop());
   }
@@ -302,7 +520,15 @@ export class Coach {
     g.clearRect(0, 0, w, h);
 
     if (this.showGrid) this._drawGrid(g, w, h);
-    if (this.head) this._drawHead(g, w, h);
+
+    for (const s of this.subjects) {
+      drawSkeleton(g, s.pts, p => p, w, h,
+                   this.ready ? 'rgba(74,222,128,.85)' : 'rgba(255,138,91,.8)');
+      this._drawHeadMark(g, w, h, s.head.x, s.head.y, s.headTop);
+    }
+    if (!this.subjects.length && this.head) {
+      this._drawHeadMark(g, w, h, this.head.x, this.head.y, null);
+    }
 
     const t = this.tilt.read();
     if (t && t.rollValid) this._drawLevel(g, w, h, t.roll);
@@ -318,7 +544,6 @@ export class Coach {
     }
     g.stroke();
 
-    // 三分交点，站位的四个甜点
     g.fillStyle = 'rgba(255,138,91,.85)';
     for (const px of [1 / 3, 2 / 3]) {
       for (const py of [1 / 3, 2 / 3]) {
@@ -326,22 +551,27 @@ export class Coach {
       }
     }
 
-    // 头顶留白参考线
     g.strokeStyle = 'rgba(255,255,255,.16)';
     g.setLineDash([5, 6]);
     g.beginPath(); g.moveTo(0, h * 0.14); g.lineTo(w, h * 0.14); g.stroke();
     g.setLineDash([]);
   }
 
-  _drawHead(g, w, h) {
-    const x = this.head.x * w, y = this.head.y * h;
-    g.strokeStyle = 'rgba(255,138,91,.95)';
+  _drawHeadMark(g, w, h, hx, hy, headTop) {
+    const x = hx * w, y = hy * h;
+    g.strokeStyle = this.ready ? 'rgba(74,222,128,.95)' : 'rgba(255,138,91,.95)';
     g.lineWidth = 2;
     g.beginPath(); g.arc(x, y, 15, 0, Math.PI * 2); g.stroke();
 
-    // 指向最近的那条三分竖线
-    const target = Math.abs(this.head.x - 1 / 3) < Math.abs(this.head.x - 2 / 3) ? 1 / 3 : 2 / 3;
-    if (Math.abs(this.head.x - target) > 0.05) {
+    // 头顶留白：画一条线到头顶，一眼能看出上面空了多少
+    if (headTop !== null && headTop > 0) {
+      g.setLineDash([3, 4]);
+      g.beginPath(); g.moveTo(x, headTop * h); g.lineTo(x, 0); g.stroke();
+      g.setLineDash([]);
+    }
+
+    const target = Math.abs(hx - 1 / 3) < Math.abs(hx - 2 / 3) ? 1 / 3 : 2 / 3;
+    if (Math.abs(hx - target) > 0.05) {
       g.strokeStyle = 'rgba(255,138,91,.55)';
       g.setLineDash([4, 5]);
       g.beginPath(); g.moveTo(x, y); g.lineTo(w * target, y); g.stroke();
@@ -355,7 +585,6 @@ export class Coach {
     const ok = Math.abs(roll) <= ROLL_TOLERANCE;
     const rad = (-roll * Math.PI) / 180;
 
-    // 固定的水平参考
     g.strokeStyle = 'rgba(255,255,255,.34)';
     g.lineWidth = 1.5;
     g.beginPath();
@@ -363,7 +592,6 @@ export class Coach {
     g.moveTo(cx + half * 0.42, cy); g.lineTo(cx + half, cy);
     g.stroke();
 
-    // 跟着机身转的那条，重合即为水平
     g.strokeStyle = ok ? 'rgba(74,222,128,.95)' : 'rgba(255,138,91,.95)';
     g.lineWidth = 2.5;
     g.save();
@@ -400,6 +628,10 @@ export class Coach {
     $('#camError').hidden = false;
     $('#camErrorMsg').textContent = msg;
   }
+}
+
+function area(b) {
+  return b ? Math.max(0, b.x1 - b.x0) * Math.max(0, b.y1 - b.y0) : 0;
 }
 
 export { SHOT_TYPES };

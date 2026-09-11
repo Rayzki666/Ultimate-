@@ -145,15 +145,34 @@ ul.tight li { margin-bottom: .45em; }
 .coach-tip.sev-bad  { border-color: rgba(251,113,133,.5); }
 .coach-tip.sev-warn { border-color: rgba(251,191,36,.45); }
 .coach-tip.sev-good { border-color: rgba(74,222,128,.45); }
+.coach-tip.sev-ready {
+  border-color: rgba(74,222,128,.9);
+  background: rgba(16,42,26,.86);
+  color: #b9f6cd;
+  font-weight: 600;
+  justify-content: center;
+}
+
+/* 绿灯：全部过关的那一刻，四周亮一圈。眼角余光就能看见，不用盯着读字。 */
+.camera-stage.is-ready::after {
+  content: "";
+  position: absolute; inset: 0;
+  border: 3px solid rgba(74,222,128,.9);
+  box-shadow: inset 0 0 32px rgba(74,222,128,.22);
+  pointer-events: none;
+  animation: readyIn .18s ease;
+}
+@keyframes readyIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes tipIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 .cam-bar {
   position: absolute;
   left: 0; right: 0; bottom: 0;
-  display: flex; gap: 6px; justify-content: space-between;
+  display: flex; flex-direction: column; gap: 6px;
   padding: 10px 10px 14px;
   background: linear-gradient(to top, rgba(0,0,0,.72), transparent);
 }
+.cam-row { display: flex; gap: 6px; }
 .cam-bar[hidden] { display: none; }
 .cam-btn {
   flex: 1;
@@ -378,7 +397,7 @@ details ul { color: var(--dim); font-size: .88rem; }
 }
 .toast[hidden] { display: none; }
 /* 取景页底部堆着控制条和「拍什么」，提示条得让开 */
-body.cam-on .toast { bottom: calc(var(--tab-h) + var(--safe-b) + 152px); }
+body.cam-on .toast { bottom: calc(var(--tab-h) + var(--safe-b) + 196px); }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
@@ -388,7 +407,7 @@ body.cam-on .toast { bottom: calc(var(--tab-h) + var(--safe-b) + 152px); }
 .cam-stack {
   position: absolute;
   left: 12px; right: 12px;
-  bottom: 66px;
+  bottom: 108px;
   display: flex; flex-direction: column; gap: 8px;
 }
 .cam-stack[hidden] { display: none; }
