@@ -33,7 +33,11 @@ html, body {
   overscroll-behavior-y: none;
 }
 
+html { scroll-padding-bottom: calc(var(--tab-h) + var(--safe-b) + 16px); }
+
 body {
+  height: auto;
+  min-height: 100%;
   padding-bottom: calc(var(--tab-h) + var(--safe-b));
 }
 
@@ -387,6 +391,7 @@ details ul { color: var(--dim); font-size: .88rem; }
 
 /* ── 提示条 ───────────────────────────────────────── */
 .toast {
+  pointer-events: none;
   position: fixed; left: 50%; transform: translateX(-50%);
   bottom: calc(var(--tab-h) + var(--safe-b) + 16px);
   background: rgba(30,33,42,.96);

@@ -76,6 +76,12 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.locator('#reviewGrid .shot').count(), 1);
     assert.equal(await page.evaluate(() => window.__coach.running), false);
     await page.screenshot({ path: 'test-results/camera-review.png', fullPage: true });
+    // Even the final photo must remain reachable with the checklist collapsed.
+    await page.locator('#localChecklist').evaluate(el => { el.hidden = true; });
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const saveBounds = await page.getByRole('button', { name: '保存照片', exact: true }).boundingBox();
+    const navBounds = await page.locator('#tabbar').boundingBox();
+    assert.ok(saveBounds.y + saveBounds.height <= navBounds.y, 'last photo save button clears fixed navigation');
     const [saved] = await Promise.all([
       page.waitForEvent('download', { timeout: 45000 }),
       page.getByRole('button', { name: '保存照片', exact: true }).click({ timeout: 15000 }),
