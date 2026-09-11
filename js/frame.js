@@ -128,7 +128,8 @@ export function coverRect(video, boxW, boxH) {
 }
 
 /** 屏幕内归一化的方框 → 源图像素方框，喂给 readRegion。 */
-export function regionFromBox(box, crop) {
+export function regionFromBox(box, crop, mirror = false) {
+  if (mirror) box = { ...box, x0: 1 - box.x1, x1: 1 - box.x0 };
   const x0 = Math.max(0, Math.min(1, box.x0)), x1 = Math.max(0, Math.min(1, box.x1));
   const y0 = Math.max(0, Math.min(1, box.y0)), y1 = Math.max(0, Math.min(1, box.y1));
   if (x1 <= x0 || y1 <= y0) return null;

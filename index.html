@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0e0f12">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -18,81 +18,87 @@
 <!-- ── 取景教练 ───────────────────────────────────────── -->
 <section class="view" id="view-coach" data-view="coach">
   <div class="camera-stage" id="cameraStage">
-    <video id="cam" playsinline muted autoplay></video>
-    <canvas id="overlay"></canvas>
-
+    <div class="camera-preview">
+      <video id="cam" playsinline muted autoplay></video>
+      <canvas id="overlay" aria-label="人物位置与构图参考线"></canvas>
+      <div class="hud" id="hud" hidden>
+        <div class="live-heading"><span class="live-dot"></span><span id="coachState">实时指导</span><span class="local-label">画面在本机分析</span></div>
+        <div class="hud-top">
+          <div class="chip" id="chipLevel"><span class="chip-k">水平</span><span class="chip-v">待测</span></div>
+          <div class="chip" id="chipPitch"><span class="chip-k">俯仰</span><span class="chip-v">待测</span></div>
+          <div class="chip" id="chipLight"><span class="chip-k">光</span><span class="chip-v">待测</span></div>
+          <div class="chip" id="chipSubject" hidden><span class="chip-k">人</span><span class="chip-v">待测</span></div>
+        </div>
+      </div>
+    </div>
     <div class="cam-idle" id="camIdle">
       <div class="cam-idle-inner">
-        <h1>取景教练</h1>
-        <p>打开取景框，它会一直盯着看：机身歪没歪、镜头是俯是仰、光从哪边来、
-           她在画面里站得对不对、画面下沿有没有正好切在她的关节上。</p>
-        <p>一次只说一件事，而且可以念出来——你的眼睛应该在她身上，不是在屏幕上。</p>
-        <button class="btn btn-primary btn-lg" id="startCam">打开取景框</button>
-        <p class="fine">画面只在你手机里处理，不上传任何地方。</p>
+        <div class="camera-emblem" aria-hidden="true">◎</div>
+        <p class="eyebrow">好好拍 · AI 相机</p>
+        <h1>看见好画面<br>也知道怎么拍</h1>
+        <p>对准拍摄对象，听一句指导。<br>调整光线与构图，稳住，然后按下快门。</p>
+        <div class="intro-flow"><span>找到人</span><span>调一处</span><span>稳住拍</span></div>
+        <button class="btn btn-primary btn-lg" id="startCam">开启 AI 相机</button>
+        <p class="fine">自动分析人物、光线与构图；首次会下载约 18MB 识别模型。画面留在本机。</p>
       </div>
     </div>
-
     <div class="cam-error" id="camError" hidden>
-      <p id="camErrorMsg"></p>
-      <button class="btn" id="retryCam">重试</button>
+      <p id="camErrorMsg"></p><button class="btn" id="retryCam">重新打开</button>
     </div>
-
-    <!-- 抬头显示 -->
-    <div class="hud" id="hud" hidden>
-      <div class="hud-top">
-        <div class="chip" id="chipLevel"><span class="chip-k">水平</span><span class="chip-v">—</span></div>
-        <div class="chip" id="chipPitch"><span class="chip-k">俯仰</span><span class="chip-v">—</span></div>
-        <div class="chip" id="chipLight"><span class="chip-k">光</span><span class="chip-v">—</span></div>
-        <div class="chip" id="chipSubject" hidden><span class="chip-k">人</span><span class="chip-v">—</span></div>
-      </div>
-    </div>
-
-    <!-- 提示与「拍什么」叠在控制条之上，用 flex 排，免得绝对定位互相压住 -->
     <div class="cam-stack" id="camStack" hidden>
-      <div class="coach-tip" id="coachTip" hidden>
-        <span class="coach-tip-icon" id="coachTipIcon"></span>
-        <span class="coach-tip-text" id="coachTipText"></span>
+      <div class="scene-checks" aria-label="已测项目">
+        <span id="check-light" data-state="unknown">光线 · 待测</span>
+        <span id="check-framing" data-state="unknown">构图 · 待测</span>
+        <span id="check-angle" data-state="unknown">角度 · 待测</span>
+        <progress id="readyProgress" max="1" value="0" aria-label="持续稳定进度"></progress>
       </div>
-      <div class="shot-types" id="shotTypes">
-        <button data-shot="full">全身</button>
-        <button data-shot="half" aria-pressed="true">半身</button>
-        <button data-shot="close">特写</button>
-        <button data-shot="duo">合照</button>
+      <div class="coach-tip" id="coachTip" hidden>
+        <span class="coach-tip-icon" id="coachTipIcon" aria-hidden="true"></span>
+        <div><strong id="coachTipText" role="status" aria-live="polite"></strong><p id="coachTipReason"></p></div>
+      </div>
+      <div class="shot-types" id="shotTypes" role="group" aria-label="拍摄范围">
+        <button data-shot="full">全身</button><button data-shot="half" aria-pressed="true">半身</button>
+        <button data-shot="close">特写</button><button data-shot="duo">合照</button>
+      </div>
+      <div class="composition-types" id="compositionTypes" role="group" aria-label="构图偏好">
+        <span>构图</span>
+        <button data-composition="thirds" aria-pressed="true">三分</button>
+        <button data-composition="center" aria-pressed="false">居中</button>
+        <button data-composition="free" aria-pressed="false">自由</button>
       </div>
     </div>
-
-    <!-- 底部相机控制条 -->
     <div class="cam-bar" id="camBar" hidden>
-      <div class="cam-row">
-        <button class="cam-btn" id="btnGrid" aria-pressed="true">构图</button>
-        <button class="cam-btn" id="btnTilt">水平仪</button>
-        <button class="cam-btn" id="btnTrack">认人</button>
-        <button class="cam-btn" id="btnVoice">语音</button>
+      <div class="cam-row cam-tools">
+        <button class="cam-btn" id="btnGrid" aria-pressed="true">网格</button>
+        <button class="cam-btn" id="btnTilt" aria-pressed="false">水平仪</button>
+        <button class="cam-btn" id="btnTrack" aria-pressed="false">识别</button>
+        <button class="cam-btn" id="btnVoice" aria-pressed="false">语音</button>
+        <button class="cam-btn" id="btnStop">关闭</button>
       </div>
-      <div class="cam-row">
-        <button class="cam-btn" id="btnFlip">前后</button>
-        <label class="cam-btn cam-btn-shutter" id="btnShutter">
-          用系统相机拍
+      <div class="shutter-row">
+        <button class="cam-btn gallery-button" id="viewCaptures" disabled aria-label="查看本次拍摄">
+          <span id="captureCount">0</span><span>本次拍摄</span>
+        </button>
+        <button class="shutter-button" id="captureNow" disabled aria-label="拍摄当前画面"><span></span></button>
+        <button class="cam-btn" id="btnFlip" aria-label="切换前后摄像头">前后<br>切换</button>
+      </div>
+      <div class="capture-note"><span id="captureStatus" role="status">随时可拍 · 绿灯是时机建议</span>
+        <label class="native-camera-link" tabindex="0" role="button" id="btnShutter">系统相机
           <input type="file" accept="image/*" capture="environment" id="nativeShot" hidden>
         </label>
-        <button class="cam-btn" id="btnStop">关闭</button>
       </div>
     </div>
   </div>
-
   <div class="coach-help" id="coachHelp">
     <details>
-      <summary>这个页面在看什么</summary>
+      <summary>如何拍出更满意的照片</summary>
       <ul class="tight">
-        <li><b>认人</b>——点开之后会实时找出她的身体关键点，构图、头顶留白、
-          远近、以及<b>画面下沿有没有切在脚踝或膝盖上</b>全部自动判断，不用再点屏幕。
-          模型第一次要下载约 17MB，之后就存在本机了。没点开也能用，点一下画面里她头的位置即可。</li>
-        <li><b>语音</b>——把当前这条提示念出来，这样你可以一直看着她。</li>
-        <li><b>绿灯</b>——所有项都过了，画面四周会亮一圈绿边并震一下，那就是可以按的时刻。</li>
-        <li><b>水平</b>——机身左右歪了几度。地平线歪 2° 以上一眼就能看出来。</li>
-        <li><b>俯仰</b>——镜头是朝下还是朝上。拍脸和半身<b>略微俯拍</b>最好看；拍全身要<b>把手机放低</b>。</li>
-        <li><b>光</b>——顺光 / 侧光 / 逆光，以及过曝欠曝。逆光不是不能拍，是要知道自己在逆光。</li>
-        <li><b>构图框</b>——把她放在竖线上，别放正中间；头顶别留太多空；虚线是<b>关节切割警戒带</b>，画面下沿别正好切在膝盖、脚踝、手腕上。</li>
+        <li><b>先选范围，再选构图。</b>全身、半身、特写、合照有不同的起始建议。居中、三分、自由都可以。</li>
+        <li><b>一次只调一处。</b>大字告诉你下一步，下面解释原因；点「语音」可以开关播报。</li>
+        <li><b>稳住再拍。</b>已测条件满足、人物位置持续稳定后亮绿灯。未识别、画面中断、合照只看到一人时不会亮灯。</li>
+        <li><b>绿灯不代表完美。</b>当前没有测量眼睛是否睁开、表情、背景内容或真实对焦；也不保证每一张清晰。</li>
+        <li><b>照片与取景框一致。</b>网页快门保存视频帧，画质受设备与浏览器限制；需要原生画质时可尝试「系统相机」。</li>
+        <li><b>照片暂存在本次页面会话。</b>请在选片页保存，刷新页面会丢失。本机分析不会上传照片；AI 点评仍需主动点击。</li>
       </ul>
     </details>
   </div>

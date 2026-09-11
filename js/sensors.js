@@ -16,6 +16,8 @@ const SMOOTH = 0.18; // 一阶低通，越小越稳越迟钝
 
 export class Tilt {
   constructor() {
+    this._generation = 0;
+    this.lastAt = -Infinity;
     this.g = null;          // 平滑后的重力方向（单位向量）
     this.active = false;
     this.permission = 'unknown'; // unknown | granted | denied | unsupported
@@ -29,11 +31,13 @@ export class Tilt {
 
   /** 必须在用户手势里调用（iOS 13+ 的要求）。*/
   async start() {
+    if (this.active) return true;
+    const generation = ++this._generation;
     if (typeof DeviceOrientationEvent === 'undefined') {
       this.permission = 'unsupported';
       return false;
     }
-    if (Tilt.needsPermission) {
+    if (Tilt.needsPermission && this.permission !== 'granted') {
       try {
         const res = await DeviceOrientationEvent.requestPermission();
         this.permission = res === 'granted' ? 'granted' : 'denied';
@@ -45,19 +49,22 @@ export class Tilt {
     } else {
       this.permission = 'granted';
     }
+    if (generation !== this._generation) return false;
     window.addEventListener('deviceorientation', this._onOrient, true);
     this.active = true;
     return true;
   }
 
   stop() {
+    ++this._generation;
     window.removeEventListener('deviceorientation', this._onOrient, true);
     this.active = false;
     this.g = null;
   }
 
   _onOrient(e) {
-    if (e.beta === null || e.gamma === null) return;
+    if (!Number.isFinite(e.beta) || !Number.isFinite(e.gamma)) return;
+    this.lastAt = performance.now();
     const b = e.beta * RAD, c = e.gamma * RAD;
     const raw = {
       x: Math.sin(c) * Math.cos(b),
@@ -86,7 +93,7 @@ export class Tilt {
    *             这时候「歪不歪」本身没有意义，别报数。
    */
   read() {
-    if (!this.g) return null;
+    if (!this.g || !this.active || performance.now() - this.lastAt > 1500) return null;
     const { x, y, z } = this.g;
 
     // 重力在屏幕平面内的投影，与「屏幕正下方」的夹角。

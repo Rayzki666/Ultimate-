@@ -10,6 +10,8 @@ import { verifyKey, hasKey } from './claude.js';
 
 const coach = new Coach();
 const mounted = new Set();
+const capturedPhotos = [];
+let capturing = false;
 
 // ── 路由 ──────────────────────────────────────────────
 const MOUNTERS = {
@@ -26,7 +28,7 @@ async function go(name) {
   store.lastTab = name;
 
   // 离开取景页就把摄像头关掉，别让它在后台亮着
-  if (name !== 'coach' && coach.running) coach.stop();
+  if (name !== 'coach') coach.stop();
 
   if (!mounted.has(name) && MOUNTERS[name]) {
     mounted.add(name);
@@ -50,35 +52,41 @@ function syncCamButtons() {
   $('#btnVoice').setAttribute('aria-pressed', String(coach.voice.enabled));
 }
 
-$('#startCam').addEventListener('click', async () => {
-  // 语音必须在用户手势里先「开个口」，iOS 之后才允许程序触发
+$('#startCam').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
   coach.voice.unlock();
-  const ok = await coach.start();
-  if (!ok) return;
-  if (store.prefs.tilt !== false) await coach.enableTilt();
-  syncCamButtons();
-  if (!coach.tracker.ready && !store.prefs.trackAsked) {
-    const prefs = store.prefs; prefs.trackAsked = true; store.prefs = prefs;
-    toast('点下面的「认人」，它就能自动看构图和关节切割了。', 4200);
-  }
+  // 两个权限调用都从点击事件直接发起，避免 await 后丢失 iOS 用户手势。
+  const tiltPromise = store.prefs.tilt !== false ? coach.tilt.start() : Promise.resolve(false);
+  try {
+    const ok = await coach.start();
+    await tiltPromise;
+    if (!ok || !coach.running) coach.tilt.stop();
+    syncCamButtons();
+  } finally { btn.disabled = false; }
 });
 $('#retryCam').addEventListener('click', () => {
   $('#camError').hidden = true;
   $('#camIdle').hidden = false;
 });
 $('#btnStop').addEventListener('click', () => coach.stop());
-$('#btnFlip').addEventListener('click', () => coach.flip());
+$('#btnFlip').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try { await coach.flip(); syncCamButtons(); } finally { btn.disabled = false; }
+});
 $('#btnGrid').addEventListener('click', (e) => {
   e.currentTarget.setAttribute('aria-pressed', String(coach.toggleGrid()));
 });
 $('#btnTilt').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
   if (coach.tilt.active) {
     coach.tilt.stop();
     const p = store.prefs; p.tilt = false; store.prefs = p;
-    e.currentTarget.setAttribute('aria-pressed', 'false');
+    btn.setAttribute('aria-pressed', 'false');
   } else {
     const ok = await coach.enableTilt();
-    e.currentTarget.setAttribute('aria-pressed', String(ok));
+    btn.setAttribute('aria-pressed', String(ok));
   }
 });
 
@@ -87,7 +95,7 @@ $('#btnTrack').addEventListener('click', async (e) => {
   if (coach.tracker.ready) {
     coach.disableTracking();
     btn.setAttribute('aria-pressed', 'false');
-    toast('关了自动认人。点一下画面里她头的位置也能用。');
+    toast('已关闭人物识别。手动标记仅作构图参考，不判断拍摄时机。');
     return;
   }
   btn.disabled = true;
@@ -106,6 +114,42 @@ $$('#shotTypes button').forEach(b => {
     $$('#shotTypes button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     buzz(10);
   });
+});
+
+// 构图是偏好，居中不等于拍错了。
+$$('#compositionTypes button').forEach(b => {
+  b.setAttribute('aria-pressed', String(b.dataset.composition === coach.composition));
+  b.addEventListener('click', () => {
+    coach.setComposition(b.dataset.composition);
+    $$('#compositionTypes button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  });
+});
+
+// 本次会话最多保留 20 张，不悄悄丢弃旧照片。
+$('#captureNow').addEventListener('click', async () => {
+  if (capturing) return;
+  if (capturedPhotos.length >= 20) { toast('本次已拍 20 张。请保存照片后刷新页面，开始下一轮。'); return; }
+  capturing = true;
+  try {
+    const { blob, width, height } = await coach.capture();
+    const filename = 'haohaopai-' + Date.now() + '.jpg';
+    capturedPhotos.push(new File([blob], filename, { type: blob.type }));
+    $('#captureCount').textContent = String(capturedPhotos.length);
+    $('#viewCaptures').disabled = false;
+    $('#captureStatus').textContent = '已拍 ' + capturedPhotos.length + ' 张 · ' + width + ' × ' + height;
+    buzz(35);
+    toast('已拍下，点「本次拍摄」查看和保存。', 1800);
+  } catch (err) {
+    toast(err.message || '拍摄失败，请重试。', 3200);
+  } finally { capturing = false; }
+});
+$('#viewCaptures').addEventListener('click', async () => {
+  if (!capturedPhotos.length) return;
+  await go('review');
+  addFiles(capturedPhotos);
+});
+$('#btnShutter').addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#nativeShot').click(); }
 });
 
 // 用系统相机拍的原图，直接送到选片页
@@ -258,9 +302,12 @@ if (!mounted.has('her')) {
 const VIEWS = ['coach', 'recipes', 'cues', 'duo', 'review', 'her'];
 go(VIEWS.includes(store.lastTab) ? store.lastTab : 'coach');
 
+// 每次进入先到相机首页，照片不会自动上传。
+window.addEventListener('pagehide', () => coach.stop());
+
 // 离开页面就释放摄像头
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && coach.running) coach.stop();
+  if (document.hidden) coach.stop();
 });
 
 if ('serviceWorker' in navigator) {

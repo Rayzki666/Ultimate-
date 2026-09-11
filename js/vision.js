@@ -68,6 +68,7 @@ export class SubjectTracker {
     this.state = 'idle';   // idle | loading | ready | failed
     this.error = '';
     this._lastTs = -1;
+    this._loadId = 0;
   }
 
   get ready() { return this.state === 'ready'; }
@@ -75,6 +76,7 @@ export class SubjectTracker {
   async load(onProgress) {
     if (this.state === 'ready' || this.state === 'loading') return this.ready;
     this.state = 'loading';
+    const loadId = ++this._loadId;
     try {
       const src = (await simdSupported()) ? LOCAL : REMOTE;
       this.source = src === LOCAL ? 'local' : 'cdn';
@@ -84,17 +86,27 @@ export class SubjectTracker {
       const fileset = await FilesetResolver.forVisionTasks(src.wasm);
 
       onProgress?.('正在启动');
-      this.landmarker = await PoseLandmarker.createFromOptions(fileset, {
+      const options = {
         baseOptions: { modelAssetPath: src.model, delegate: 'GPU' },
         runningMode: 'VIDEO',
         numPoses: 2,               // 合照模式要看得见两个人
         minPoseDetectionConfidence: 0.5,
         minPosePresenceConfidence: 0.5,
         minTrackingConfidence: 0.5,
-      });
+      };
+      let landmarker;
+      try { landmarker = await PoseLandmarker.createFromOptions(fileset, options); }
+      catch (gpuError) {
+        if (loadId !== this._loadId) return false;
+        options.baseOptions.delegate = 'CPU';
+        landmarker = await PoseLandmarker.createFromOptions(fileset, options);
+      }
+      if (loadId !== this._loadId) { landmarker.close(); return false; }
+      this.landmarker = landmarker;
       this.state = 'ready';
       return true;
     } catch (err) {
+      if (loadId !== this._loadId) return false;
       this.state = 'failed';
       this.error = err?.message || String(err);
       return false;
@@ -115,6 +127,7 @@ export class SubjectTracker {
   }
 
   dispose() {
+    ++this._loadId;
     try { this.landmarker?.close(); } catch { /* 忽略 */ }
     this.landmarker = null;
     this.state = 'idle';
@@ -140,7 +153,7 @@ export function coverMapper(video, boxW, boxH, mirror = false) {
   };
 }
 
-const vis = (p) => p && p.visibility > 0.5;
+const vis = (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y) && p.visibility > 0.5;
 const inFrame = (p) => vis(p) && p.x > -0.02 && p.x < 1.02 && p.y > -0.02 && p.y < 1.02;
 
 function midpoint(a, b) {

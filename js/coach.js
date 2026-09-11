@@ -12,35 +12,15 @@ import { $, toast, buzz } from './ui.js';
 import { Tilt } from './sensors.js';
 import { FrameReader, interpret, coverRect, regionFromBox } from './frame.js';
 import { SubjectTracker, readSubject, drawSkeleton, coverMapper } from './vision.js';
-import { Voice, shorten } from './speak.js';
+import { Voice } from './speak.js';
+import { SHOT_TYPES, targetFor, assessScene, ReadinessGate } from './guidance.js';
+import { captureFrame } from './capture.js';
 import { store } from './store.js';
 
-const SHOT_TYPES = {
-  full:  { label: '全身', lo: -4, hi:  5,
-           over:  '手机放低到腰这么高。现在是俯拍，腿会显短一截。',
-           overV: '手机放低一点',
-           under: '仰得太狠了，身体会往后倒。',
-           underV: '别仰这么多' },
-  half:  { label: '半身', lo:  1, hi: 11,
-           over:  '俯得有点多，会显头大身子小。收一点。',
-           overV: '俯得太多了',
-           under: '别从下往上拍——下巴和鼻孔会很明显。镜头抬到比她眼睛略高。',
-           underV: '抬高一点，别仰拍' },
-  close: { label: '特写', lo:  4, hi: 17,
-           over:  '太俯了，额头会变大。',
-           overV: '俯得太多了',
-           under: '抬高一点，比她眼睛高一点点再往下拍，脸会小、眼睛会大。',
-           underV: '抬到比她眼睛高一点' },
-  duo:   { label: '合照', lo: -3, hi:  8,
-           over:  '手机架高了，两个人都会显矮。放到胸口高度。',
-           overV: '手机放低到胸口高度',
-           under: '仰拍两个人容易显下巴，平一点。',
-           underV: '平一点' },
-};
 
 const ROLL_TOLERANCE = 2.4;   // 歪超过这个度数就提醒，2° 以上肉眼能看出来
-const TIP_HOLD_MS    = 900;   // 提示至少停留这么久，避免抖来抖去
-const DETECT_HZ      = 12;    // 关键点检测频率。再高对判断没帮助，只费电
+const TIP_HOLD_MS    = 650;   // 提示至少停留这么久，避免抖来抖去
+const DETECT_HZ      = 8;    // 关键点检测频率。再高对判断没帮助，只费电
 
 export class Coach {
   constructor() {
@@ -62,6 +42,15 @@ export class Coach {
     this.reading  = null;
     this.subjects = [];
     this.ready    = false;
+    this.composition = ['thirds', 'center', 'free'].includes(store.prefs.composition) ? store.prefs.composition : 'thirds';
+    this.gate = new ReadinessGate();
+    this._targetX = null;
+    this._session = 0;
+    this._starting = false;
+    this._lastPoseAt = -Infinity;
+    this._frameSeenAt = -Infinity;
+    this._sampleVideoTime = -1;
+    this._detectVideoTime = -1;
 
     this._raf = null;
     this._statTimer = null;
@@ -75,58 +64,75 @@ export class Coach {
   // ── 生命周期 ────────────────────────────────────────
   async start() {
     if (this.running) return true;
-
-    if (!window.isSecureContext) {
-      this._fail('这个页面必须用 HTTPS 打开，浏览器才允许访问摄像头。');
+    if (this._starting) return false;
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      this._fail('请在支持相机的浏览器中用 HTTPS 打开。iPhone 建议使用 Safari。');
       return false;
     }
-    if (!navigator.mediaDevices?.getUserMedia) {
-      this._fail('这个浏览器不支持网页调用摄像头。在 iPhone 上请用 Safari 打开。');
-      return false;
-    }
-
+    const session = ++this._session;
+    this._starting = true;
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: this.facing },
-          width:  { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: this.facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false,
       });
+      if (session !== this._session || document.hidden) {
+        stream.getTracks().forEach(t => t.stop());
+        return false;
+      }
+      this.stream = stream;
+      this.video.srcObject = stream;
+      this.video.style.transform = this.facing === 'user' ? 'scaleX(-1)' : '';
+      await this.video.play();
+      if (session !== this._session) return false;
+      stream.getVideoTracks()[0]?.addEventListener('ended', () => {
+        if (session !== this._session) return;
+        this.stop();
+        this._fail('相机连接已中断，请重新打开。');
+      });
+      $('#camIdle').hidden = true;
+      $('#camError').hidden = true;
+      $('#hud').hidden = false;
+      $('#camBar').hidden = false;
+      $('#camStack').hidden = false;
+      document.body.classList.add('cam-on');
+      this.running = true;
+      if (store.prefs.voice !== false) this._setVoice(true);
+      // 已获许可时可以重启监听；第一次权限申请由按钮手势触发。
+      if (this.tilt.permission === 'granted' && store.prefs.tilt !== false) this.tilt.start();
+      if (store.prefs.track !== false) this.enableTracking();
+      this._loop();
+      this._sample();
+      this._statTimer = setInterval(() => this._sample(), 220);
+      return true;
     } catch (err) {
-      this._fail(this._explain(err));
+      if (session === this._session) {
+        this.stop();
+        this._fail(this._explain(err));
+      }
       return false;
+    } finally {
+      if (session === this._session) this._starting = false;
     }
-
-    this.video.srcObject = this.stream;
-    // 前置画面镜像，跟人照镜子的直觉一致；分析时会把 x 一并翻回来
-    this.video.style.transform = this.facing === 'user' ? 'scaleX(-1)' : '';
-    try { await this.video.play(); } catch { /* iOS 偶尔要等一拍 */ }
-
-    $('#camIdle').hidden = true;
-    $('#camError').hidden = true;
-    $('#hud').hidden = false;
-    $('#camBar').hidden = false;
-    $('#camStack').hidden = false;
-    document.body.classList.add('cam-on');
-
-    this.running = true;
-    if (store.prefs.tilt !== false) this.tilt.start();
-    if (store.prefs.voice !== false) this._setVoice(true);
-    if (store.prefs.track) this.enableTracking();
-
-    this._loop();
-    this._statTimer = setInterval(() => this._sample(), 220);
-    return true;
   }
 
   stop() {
+    ++this._session;
+    this._starting = false;
     this.running = false;
     cancelAnimationFrame(this._raf);
     clearInterval(this._statTimer);
     this.tilt.stop();
     this.voice.stop();
+    this.tracker.dispose();
+    this.gate.reset();
+    this.reading = null;
+    this.stats = null;
+    this._targetX = null;
+    this._lastPoseAt = -Infinity;
+    this._frameSeenAt = -Infinity;
+    this._sampleVideoTime = -1;
+    this._detectVideoTime = -1;
     this.stream?.getTracks().forEach(t => t.stop());
     this.stream = null;
     this.video.srcObject = null;
@@ -140,6 +146,9 @@ export class Coach {
     $('#camStack').hidden = true;
     document.body.classList.remove('cam-on');
     $('#cameraStage')?.classList.remove('is-ready');
+    $('#captureNow').disabled = true;
+    $('#btnTrack').disabled = false;
+    $('#btnTrack').textContent = '识别';
     this.octx.clearRect(0, 0, this.overlay.width, this.overlay.height);
   }
 
@@ -157,6 +166,7 @@ export class Coach {
 
   async enableTilt() {
     const ok = await this.tilt.start();
+    if (!this.running) { this.tilt.stop(); return false; }
     const prefs = store.prefs; prefs.tilt = ok; store.prefs = prefs;
     if (!ok) {
       toast(this.tilt.permission === 'denied'
@@ -166,23 +176,35 @@ export class Coach {
     return ok;
   }
 
-  /** 自动认人。模型要从 CDN 下，所以是按需加载，失败就退回点一下的老路子。 */
+  /** 自动分析默认开启，关闭后记住用户选择。模型加载完成不代表看到了人。 */
   async enableTracking() {
     if (this.tracker.ready) return true;
-    const ok = await this.tracker.load(msg => toast(msg, 2600));
-    const prefs = store.prefs; prefs.track = ok; store.prefs = prefs;
+    if (this.tracker.state === 'loading') return false;
+    const session = this._session;
+    const btn = $('#btnTrack');
+    btn.disabled = true;
+    btn.textContent = '加载中';
+    const ok = await this.tracker.load();
+    if (session !== this._session || !this.running) return false;
+    btn.disabled = false;
+    btn.textContent = ok ? '识别' : '重试识别';
+    btn.setAttribute('aria-pressed', String(ok));
     if (ok) {
-      this.head = null;   // 认得出人了，手动标记就不需要了
-      toast('认出人了。构图、留白、关节切割现在都自动看。', 3400);
+      this.head = null;
+      const prefs = store.prefs; prefs.track = true; store.prefs = prefs;
     } else {
-      toast('识别模型没加载成功（' + (this.tracker.error || '网络问题') + '）。点一下画面里她头的位置也一样能用。', 5000);
+      toast('人物识别暂不可用，可重试或直接拍摄。', 3500);
     }
+    this._updateHud();
     return ok;
   }
 
   disableTracking() {
     this.tracker.dispose();
     this.subjects = [];
+    this.gate.reset();
+    this._lastPoseAt = -Infinity;
+    this._updateHud();
     const prefs = store.prefs; prefs.track = false; store.prefs = prefs;
   }
 
@@ -199,7 +221,34 @@ export class Coach {
   toggleVoice() { return this._setVoice(!this.voice.enabled); }
 
   setShotType(type) {
-    if (SHOT_TYPES[type]) this.shotType = type;
+    if (SHOT_TYPES[type]) {
+      this.shotType = type;
+      this._targetX = null;
+      this.gate.reset();
+      if (this.running) this._updateHud();
+    }
+  }
+
+  setComposition(value) {
+    if (!['thirds', 'center', 'free'].includes(value)) return;
+    this.composition = value;
+    this._targetX = null;
+    this.gate.reset();
+    const prefs = store.prefs; prefs.composition = value; store.prefs = prefs;
+    if (this.running) this._updateHud();
+  }
+
+  async capture() {
+    if (!this.running || performance.now() - this._frameSeenAt > 750) {
+      throw new Error('相机画面还没准备好，请稍等。');
+    }
+    const { w, h } = this._box;
+    const shot = await captureFrame(this.video, w, h, this.facing === 'user');
+    this.gate.reset();
+    this.ready = false;
+    $('#cameraStage').classList.remove('is-ready');
+    if (this.running) this._updateHud();
+    return shot;
   }
 
   toggleGrid() {
@@ -215,6 +264,20 @@ export class Coach {
 
   _sample() {
     if (!this.running) return;
+    const now = performance.now();
+    if (this.video.currentTime !== this._sampleVideoTime) {
+      this._sampleVideoTime = this.video.currentTime;
+      this._frameSeenAt = now;
+    }
+    if (now - this._lastPoseAt > 500) this.subjects = [];
+    if (this.video.readyState < 2 || now - this._frameSeenAt > 750) {
+      this.reading = null;
+      this.subjects = [];
+      $('#captureNow').disabled = true;
+      this._updateHud();
+      return;
+    }
+    $('#captureNow').disabled = false;
     const { w, h } = this._box;
     const crop = coverRect(this.video, w, h);
 
@@ -224,20 +287,25 @@ export class Coach {
       let faceLuma = null;
       const s0 = this.subjects[0];
       if (s0?.face) {
-        const rect = regionFromBox(s0.face, crop);
+        const rect = regionFromBox(s0.face, crop, this.facing === 'user');
         if (rect) faceLuma = this.reader.readRegion(this.video, rect);
       }
       this.stats = stats;
       this.reading = interpret(stats, faceLuma);
+    } else {
+      this.reading = null;
+      this.stats = null;
     }
     this._updateHud();
   }
 
   _detect(now) {
-    if (!this.tracker.ready || now - this._lastDetect < 1000 / DETECT_HZ) return;
+    if (!this.tracker.ready || this.video.readyState < 2 || this.video.currentTime === this._detectVideoTime || now - this._lastDetect < 1000 / DETECT_HZ) return;
+    this._detectVideoTime = this.video.currentTime;
     this._lastDetect = now;
 
     const raw = this.tracker.detect(this.video, now);
+    this._lastPoseAt = now;
     if (!raw) { this.subjects = []; return; }
 
     const { w, h } = this._box;
@@ -248,13 +316,14 @@ export class Coach {
         const s = readSubject(mapped);
         return s ? { ...s, pts: mapped } : null;
       })
-      .filter(Boolean)
+      .filter(s => s && s.head.x >= 0 && s.head.x <= 1 && s.head.y >= 0 && s.head.y <= 1)
       .sort((a, b) => area(b.box) - area(a.box));
   }
 
   // ── 抬头显示 ────────────────────────────────────────
   _updateHud() {
-    const t = this.tilt.read();
+    const rawTilt = this.tilt.read();
+    const t = rawTilt && { ...rawTilt, pitch: this.facing === 'user' ? -rawTilt.pitch : rawTilt.pitch };
     const r = this.reading;
 
     const setChip = (sel, value, level) => {
@@ -285,6 +354,8 @@ export class Coach {
       setChip('#chipLight', `${r.light.label}·${r.exposure.label}`,
               r.exposure.level === 'bad' ? 'bad'
               : r.exposure.level === 'warn' || r.light.level === 'warn' ? 'warn' : 'good');
+    } else {
+      setChip('#chipLight', '待测', null);
     }
 
     const chipS = $('#chipSubject');
@@ -300,190 +371,59 @@ export class Coach {
     this._pickTip(t, r);
   }
 
-  /** 按「有多毁照片」排序，只挑最靠前的那一条。 */
   _pickTip(t, r) {
-    const spec = SHOT_TYPES[this.shotType];
-    const subj = this.subjects[0];
-    let tip = null;
-
-    const T = (key, sev, icon, text, voice) => ({ key, sev, icon, text, voice: voice || shorten(text) });
-
-    // 1. 曝光崩了——照片直接废
-    if (r && r.exposure.level === 'bad') {
-      tip = T('exp-bad', 'bad', '◐', r.exposure.tip, r.exposure.voice);
-    }
-    // 2. 脸上的光没了
-    else if (r && (r.light.label === '逆光' || r.light.label === '脸过曝')) {
-      tip = T('light-bad', 'warn', '☀', r.light.tip, r.light.voice);
-    }
-    // 3. 画面下沿切在关节上——构图硬伤，而且小屏幕上很难当场发现
-    else if (subj?.crop) {
-      tip = T('crop-' + subj.crop.at, 'bad', '✂',
-              subj.crop.text,
-              { ankle: '切在脚踝上了', knee: '切在膝盖上了',
-                wrist: '切在手腕上了', foot: '脚尖切掉了' }[subj.crop.at]);
-    }
-    // 4. 机身歪
-    else if (t && t.rollValid && Math.abs(t.roll) > ROLL_TOLERANCE) {
-      const dir = t.roll > 0 ? '左' : '右';
-      tip = T('roll', Math.abs(t.roll) > 5 ? 'bad' : 'warn', '⊹',
-              `歪了 ${Math.abs(t.roll).toFixed(1)}°，往${dir}边掰回来一点。`,
-              `往${dir}掰一点`);
-    }
-    // 5. 俯仰角
-    else if (t && t.pitch > spec.hi + 2) {
-      tip = T('pitch-over', 'warn', '↓', spec.over, spec.overV);
-    } else if (t && t.pitch < spec.lo - 2) {
-      tip = T('pitch-under', 'warn', '↑', spec.under, spec.underV);
-    }
-    // 6～9. 认出人之后才有的判断
-    else if (subj) {
-      tip = this._subjectTip(subj);
-    }
-    // 没开自动认人时的退路：手动标记
-    else if (this.head) {
-      tip = this._headTip();
-    }
-
-    if (!tip && r && r.exposure.level === 'warn') {
-      tip = T('exp-warn', 'warn', '◐', r.exposure.tip, r.exposure.voice);
-    }
-    if (!tip && r && r.notes.length) {
-      tip = T('note', 'good', '·', r.notes[0]);
-    }
-
-    // 什么都没挑出来 = 可以按了。
-    // 但前提是我们确实知道她在哪儿——没认出人、也没点过位置的时候，
-    // 「可以按了」是一句没有根据的话，不能说。
-    const wasReady = this.ready;
-    this.ready = !tip && (Boolean(subj) || Boolean(this.head));
-
-    if (!tip) {
-      tip = this.ready
-        ? T('ready', 'ready', '●', '可以按了。', '可以按了')
-        : this.tracker.ready
-          ? T('nobody', 'good', '◌', '还没看到人。让她走进画面，或者退后一点。', '还没看到人')
-          : T('clear', 'good', '✓',
-              '光和角度都没问题。想让它自动看构图，点下面的「认人」。',
-              '');
-    }
-
-    this._showTip(tip, wasReady);
-  }
-
-  _subjectTip(s) {
-    const T = (key, sev, icon, text, voice) => ({ key, sev, icon, text, voice: voice || shorten(text) });
-    const boxH = s.box ? s.box.y1 - s.box.y0 : 0;
-
-    // 头顶
-    if (s.headTop < 0.015 && this.shotType !== 'close') {
-      return T('head-crop', 'warn', '↕', '头快出画了，镜头往上抬一点。', '镜头抬一点');
-    }
-    if (s.headTop > 0.28 && this.shotType !== 'full') {
-      return T('headroom', 'warn', '↕',
-               '头顶上面空太多了。手机往下压，或者你蹲下来一点——她会立刻变高。',
-               '头顶空太多，手机往下压');
-    }
-
-    // 想拍全身却看不到脚
-    if (this.shotType === 'full' && !s.visible.ankles && s.visible.hips) {
-      return T('not-full', 'warn', '⤢',
-               '这个框拍不到全身。退后两步，或者把手机放低到腰的高度再往回收。',
-               '退后两步，拍不到全身');
-    }
-    // 太小 / 顶天立地
-    if (boxH > 0 && boxH < 0.42) {
-      return T('too-far', 'warn', '⤢',
-               '她在画面里太小了。走近两步，或者变焦到 2x——别用 0.5x。',
-               '太远了，走近点');
-    }
-    if (boxH > 0.985 && this.shotType !== 'close') {
-      return T('too-tight', 'warn', '⤢', '顶天立地了，退半步给她留点余地。', '退半步');
-    }
-    if (this.shotType === 'close' && s.face && (s.face.x1 - s.face.x0) < 0.19) {
-      return T('close-far', 'warn', '⤢',
-               '特写要够近。退后两步，然后拉到 3x——退后变焦比走近拍好看。',
-               '拉到三倍变焦');
-    }
-
-    // 站位
-    const x = s.head.x;
-    const offCenter = Math.abs(x - 0.5);
-    const nearThird = Math.min(Math.abs(x - 1 / 3), Math.abs(x - 2 / 3));
-    if (offCenter < 0.06 && this.shotType !== 'close' && this.shotType !== 'duo') {
-      const dir = x <= 0.5 ? '左' : '右';
-      return T('centered', 'warn', '⊞',
-               `她正好在画面正中间。手机往${dir === '左' ? '右' : '左'}转一点，把她挪到竖线上。`,
-               `她在正中间，挪到竖线上`);
-    }
-    if (x < 0.08 || x > 0.92) {
-      return T('edge', 'warn', '⊞', '她快贴到画面边上了，往中间带一点。', '太靠边了');
-    }
-
-    // 合照：两个人之间的缝
-    if (this.shotType === 'duo' && this.subjects.length >= 2) {
-      const [a, b] = this.subjects;
-      const gap = Math.abs(a.head.x - b.head.x);
-      const scale = (a.headScale + b.headScale) / 2 || 0.1;
-      if (gap > scale * 3.2) {
-        return T('duo-gap', 'warn', '◐',
-                 '你们俩中间有缝。靠近到肩膀挨着——有缝的合照看着像同事。',
-                 '靠近一点，中间有缝');
-      }
-    }
-
-    // 体态。这两条是建议不是纠错，所以放在最后。
-    if (s.shoulderTilt !== null && Math.abs(s.shoulderTilt) > 9) {
-      return T('shoulders', 'good', '⌐',
-               '她一边肩膀明显高。提醒一句「肩膀往后、往下沉」就好。',
-               '让她肩膀沉一下');
-    }
-    if (s.squareness !== null && s.squareness > 2.25 && this.shotType !== 'duo') {
-      return T('square', 'good', '↻',
-               '她正面直对着镜头，这是最显宽的角度。让她身体转 45 度，脸转回来。',
-               '让她身体转四十五度');
-    }
-    if (nearThird < 0.06) return null;   // 站位已经对了，没什么可说的
-    return null;
-  }
-
-  _headTip() {
-    const { x, y } = this.head;
-    const T = (key, sev, icon, text) => ({ key, sev, icon, text, voice: shorten(text) });
-    if (y > 0.36) return T('headroom', 'warn', '↕', '头顶上面空太多了。手机往下压，或者你蹲下来一点——她会立刻变高。');
-    if (y < 0.05) return T('headcrop', 'warn', '↕', '头快出画了，镜头抬一点。');
-    if (Math.abs(x - 0.5) < 0.07 && this.shotType !== 'close') {
-      return T('centered', 'warn', '⊞', '她正好在画面正中间。往左或往右挪到竖线上，同一张照片会好看很多。');
-    }
-    return null;
-  }
-
-  /** 迟滞：新提示要稳住一会儿才换，除非严重程度升级了。 */
-  _showTip(tip, wasReady) {
+    if (!this.running) return;
     const now = performance.now();
-    if (tip.key !== this._tip.key) {
-      this._tip = { key: tip.key, since: now, shown: this._tip.shown };
+    const subjects = now - this._lastPoseAt <= 500 ? this.subjects : [];
+    if (this._targetX === null && subjects.length) {
+      this._targetX = targetFor(this.composition, this.shotType, subjects[0].head.x);
     }
-    const held = now - this._tip.since;
-    const escalating = tip.sev === 'bad' && this._tip.shown?.sev !== 'bad';
-    if (this._tip.shown && tip.key !== this._tip.shown.key && held < TIP_HOLD_MS && !escalating) {
-      tip = this._tip.shown;
-    } else {
-      this._tip.shown = tip;
-    }
+    const assessment = assessScene({
+      reading: r, tilt: t, subjects, shotType: this.shotType,
+      targetX: this._targetX, tracking: this.tracker.state,
+      manual: !subjects.length && Boolean(this.head), mirror: this.facing === 'user',
+    });
+    const wasReady = this.ready;
+    const state = this.gate.update({ now, eligible: assessment.eligible,
+      subjects: subjects.slice(0, this.shotType === 'duo' ? 2 : 1) });
+    this.ready = state.ready;
+    let tip = assessment.tip || (state.ready
+      ? { key: 'ready', sev: 'ready', icon: '✓', text: '现在可以拍',
+          reason: t ? '已测光线、构图与位置稳定。按下快门留住这一刻。' : '光线、构图与位置稳定；机身角度未测。', voice: '现在可以拍' }
+      : { key: 'steady', sev: 'good', icon: '◎', text: '保持这个画面',
+          reason: '让人物和手机都稳住片刻，再亮绿灯。', voice: '' });
+    this._showTip(tip, wasReady, state.progress, assessment.checks);
+  }
 
+  _showTip(tip, wasReady, progress, checks) {
+    const now = performance.now();
+    if (tip.key !== this._tip.key) this._tip = { key: tip.key, since: now, shown: this._tip.shown };
+    const old = this._tip.shown;
+    // 只对不同的纠正建议做迟滞；绝不延迟撤销绿灯，也不保留过期的方向。
+    if (old && old.sev === 'warn' && tip.sev === 'warn' &&
+        old.key !== tip.key && now - this._tip.since < TIP_HOLD_MS &&
+        old.key.split('-')[0] !== tip.key.split('-')[0]) tip = old;
+    else this._tip.shown = tip;
     const box = $('#coachTip');
     box.hidden = false;
     box.className = 'coach-tip sev-' + tip.sev;
+    if ($('#coachTipText').textContent !== tip.text) $('#coachTipText').textContent = tip.text;
     $('#coachTipIcon').textContent = tip.icon;
-    $('#coachTipText').textContent = tip.text;
-
-    const stage = this.video.closest('.camera-stage');
-    stage?.classList.toggle('is-ready', this.ready);
+    $('#coachTipReason').textContent = tip.reason;
+    $('#cameraStage').classList.toggle('is-ready', this.ready);
+    $('#readyProgress').value = progress;
+    $('#readyProgress').setAttribute('aria-valuetext', this.ready ? '已稳定，可以拍摄' : '等待持续稳定');
+    $('#coachState').textContent = this.ready ? '可以拍摄' : tip.key === 'steady' ? '等待稳定' : '实时指导';
+    for (const [key, label] of [['light', '光线'], ['framing', '构图'], ['angle', '角度']]) {
+      const item = $('#check-' + key);
+      item.dataset.state = checks[key];
+      item.textContent = label + (checks[key] === 'good' ? ' ✓' : checks[key] === 'warn' ? ' · 调整' : ' · 待测');
+    }
+    if ((wasReady && !this.ready) || (old && old.key !== tip.key)) this.voice.stop();
     if (this.ready && !wasReady) {
       buzz([25, 45, 25]);
-      this.voice.say('可以按了', { force: true });
-    } else if (!this.ready && tip.sev !== 'good' && tip.voice) {
+      this.voice.say(tip.voice);
+    } else if (!this.ready && (tip.sev === 'warn' || tip.sev === 'bad')) {
       this.voice.say(tip.voice);
     }
   }
@@ -535,17 +475,17 @@ export class Coach {
   }
 
   _drawGrid(g, w, h) {
+    if (this.composition === 'free') return;
+    const columns = this.composition === 'center' || this.shotType === 'close' || this.shotType === 'duo' ? [0.5] : [1 / 3, 2 / 3];
     g.lineWidth = 1;
     g.strokeStyle = 'rgba(255,255,255,.26)';
     g.beginPath();
-    for (let i = 1; i < 3; i++) {
-      g.moveTo((w * i) / 3, 0); g.lineTo((w * i) / 3, h);
-      g.moveTo(0, (h * i) / 3); g.lineTo(w, (h * i) / 3);
-    }
+    for (const x of columns) { g.moveTo(w * x, 0); g.lineTo(w * x, h); }
+    for (const y of [1 / 3, 2 / 3]) { g.moveTo(0, h * y); g.lineTo(w, h * y); }
     g.stroke();
 
     g.fillStyle = 'rgba(255,138,91,.85)';
-    for (const px of [1 / 3, 2 / 3]) {
+    for (const px of columns) {
       for (const py of [1 / 3, 2 / 3]) {
         g.beginPath(); g.arc(w * px, h * py, 3, 0, Math.PI * 2); g.fill();
       }
@@ -570,12 +510,13 @@ export class Coach {
       g.setLineDash([]);
     }
 
-    const target = Math.abs(hx - 1 / 3) < Math.abs(hx - 2 / 3) ? 1 / 3 : 2 / 3;
-    if (Math.abs(hx - target) > 0.05) {
+    const target = this.shotType === 'duo' ? null : this._targetX;
+    if (target !== null && Math.abs(hx - target) > 0.05) {
       g.strokeStyle = 'rgba(255,138,91,.55)';
       g.setLineDash([4, 5]);
       g.beginPath(); g.moveTo(x, y); g.lineTo(w * target, y); g.stroke();
       g.setLineDash([]);
+      g.beginPath(); g.arc(w * target, y, 19, 0, Math.PI * 2); g.stroke();
     }
   }
 

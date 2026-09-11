@@ -19,7 +19,7 @@ const SELF_CHECK = [
   '地平线是平的吗？歪 2 度肉眼就看得出来。',
   '有没有正好切在手腕、膝盖、脚踝上？切在关节上会很难看，往上或往下挪都行。',
   '头顶留白是不是太多了？多出来的那块天花板，等于把她压矮了。',
-  '她是不是站在画面正中间？挪到三分线上，同一张照片会好看很多。',
+  '构图是否符合你想表达的重点？居中和三分都可以，关键是有意识地选择。',
   '背景四个角有没有该挪走的东西？垃圾桶、电线杆、半个路人。',
   '她眼睛里有没有光斑？有光斑的眼睛才有神。',
   '她的手有没有事做？垂着的手是照片僵硬最大的来源。',
@@ -30,7 +30,7 @@ const shots = [];   // { file, source, stats, reading, sharp, aiEl, b64 }
 
 /** 别处（比如系统相机拍完）也能把文件直接丢进来。 */
 export function addFiles(files) {
-  handleFiles([...files]);
+  return handleFiles([...files]);
 }
 
 export function mountReview() {
@@ -164,6 +164,14 @@ function shotCard(shot, total) {
   }
 
   const body = el('div', { class: 'shot-body' }, [metrics]);
+  const save = el('button', { class: 'btn', text: '保存照片', style: 'margin-bottom:12px' });
+  save.addEventListener('click', () => {
+    const url = URL.createObjectURL(shot.file);
+    const a = el('a', { href: url, download: shot.file.name || 'haohaopai.jpg' });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  });
+  body.append(save);
 
   // 本机能给的结论
   const local = [];
