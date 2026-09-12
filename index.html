@@ -20,9 +20,9 @@
       <video id="cam" playsinline muted autoplay></video>
       <canvas id="overlay" aria-label="Subject and composition guides"></canvas>
       <div class="ready-corners" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-      <div class="ready-stamp" aria-hidden="true"><span>✓</span> READY TO SHOOT</div>
+      <div class="ready-stamp" aria-hidden="true"><span>✓</span> AI SUGGESTS · SHOOT NOW</div>
       <div class="hud" id="hud" hidden>
-        <div class="live-heading"><span class="live-dot"></span><span id="coachState">Live guidance</span><span class="local-label">On-device</span></div>
+        <div class="live-heading"><span class="live-dot"></span><span id="coachState">Live guidance</span><span class="local-label" id="processingLabel">On-device</span></div>
         <div class="hud-top">
           <div class="chip" id="chipLevel"><span class="chip-k">Roll</span><span class="chip-v">—</span></div>
           <div class="chip" id="chipPitch"><span class="chip-k">Tilt</span><span class="chip-v">—</span></div>
@@ -39,7 +39,7 @@
         <p>Choose a look. Get one clear direction.<br>Capture it when the moment feels right.</p>
         <button class="idle-style" id="idleStyle">Explore shooting styles →</button>
         <button class="btn btn-primary btn-lg" id="startCam">Open camera</button>
-        <p class="fine">Photos stay on this device. Subject detection downloads about 18 MB on first use.</p>
+        <p class="fine">Captured photos stay on this device. Optional cloud guidance shares preview frames only after you enable it. Subject detection downloads about 18 MB on first use.</p>
       </div>
     </div>
     <div class="cam-error" id="camError" hidden><p id="camErrorMsg"></p><button class="btn" id="retryCam">Try again</button></div>
@@ -50,29 +50,33 @@
         <span id="check-pose" data-state="unknown">○ Pose</span><span id="check-angle" data-state="unknown">○ Angle</span><span id="check-light" data-state="unknown">○ Light</span><span id="check-framing" data-state="unknown">○ Frame</span><span id="check-steady" data-state="unknown">○ Steady</span>
       </div>
       <progress id="readyProgress" max="1" value="0" aria-label="Steadiness"></progress>
+      <p id="aiLiveStatus" class="ai-live-status" role="status" hidden></p>
       <div class="coach-tip" id="coachTip" hidden><span class="coach-tip-icon" id="coachTipIcon" aria-hidden="true"></span><div><strong id="coachTipText" role="status" aria-live="polite"></strong><p id="coachTipReason"></p></div></div>
-      <div class="shot-types" id="shotTypes" role="group" aria-label="Framing">
-        <button data-shot="full">Full body</button><button data-shot="half" aria-pressed="true">Portrait</button><button data-shot="close">Close-up</button><button data-shot="duo">Together</button>
-      </div>
-      <div class="composition-types" id="compositionTypes" role="group" aria-label="Composition">
-        <span>Compose</span><button data-composition="thirds" aria-pressed="true">Thirds</button><button data-composition="center">Center</button><button data-composition="free">Free</button>
-      </div>
+      <details class="framing-panel" id="framingPanel">
+        <summary><span>Framing</span><strong id="framingSummary">Portrait · Thirds</strong></summary>
+        <div class="shot-types" id="shotTypes" role="group" aria-label="Framing">
+          <button data-shot="full">Full body</button><button data-shot="half" aria-pressed="true">Portrait</button><button data-shot="close">Close-up</button><button data-shot="duo">Together</button>
+        </div>
+        <div class="composition-types" id="compositionTypes" role="group" aria-label="Composition">
+          <span>Compose</span><button data-composition="thirds" aria-pressed="true">Thirds</button><button data-composition="center">Center</button><button data-composition="free">Free</button>
+        </div>
+      </details>
     </div>
     <div class="cam-bar" id="camBar" hidden>
       <div class="cam-row cam-tools">
-        <button class="cam-btn" id="btnGrid" aria-pressed="true">Grid</button><button class="cam-btn" id="btnTilt" aria-pressed="false">Level</button><button class="cam-btn" id="btnTrack" aria-pressed="false">Detect</button><button class="cam-btn" id="btnVoice" aria-pressed="false">Voice</button><button class="cam-btn" id="btnStop">Close</button>
+        <button class="cam-btn" id="btnGrid" aria-pressed="true">Grid</button><button class="cam-btn" id="btnTilt" aria-pressed="false">Level</button><button class="cam-btn" id="btnTrack" aria-pressed="false">Detect</button><button class="cam-btn" id="btnVoice" aria-pressed="false">Voice</button><button class="cam-btn" id="btnAI" aria-pressed="false">AI</button><button class="cam-btn" id="btnStop">Close</button>
       </div>
       <div class="shutter-row">
         <button class="cam-btn gallery-button" id="viewCaptures" disabled aria-label="View this session"><span id="captureCount">0</span><span>This session</span></button>
         <div class="shutter-control"><button class="shutter-button" id="captureNow" disabled aria-label="Take photo"><span></span></button><span id="shutterCue" aria-hidden="true">Take photo</span></div>
         <button class="cam-btn" id="btnFlip" aria-label="Switch camera">Flip ↻</button>
       </div>
-      <div class="capture-note"><span id="captureStatus" role="status">Shoot anytime · Green means steady</span><label class="native-camera-link" tabindex="0" role="button" id="btnShutter">Native camera<input type="file" accept="image/*" capture="environment" id="nativeShot" hidden></label></div>
+      <div class="capture-note"><span id="captureStatus" role="status">Shoot anytime · Green means AI suggests now</span><label class="native-camera-link" tabindex="0" role="button" id="btnShutter">Native camera<input type="file" accept="image/*" capture="environment" id="nativeShot" hidden></label></div>
     </div>
   </div>
   <div class="coach-help" id="coachHelp">
     <p class="style-live-note" id="styleLiveNote">Choose a style to shape your live guidance.</p>
-    <details><summary>About the guidance</summary><p class="fine">Guidance adapts to measured light and subject position. Style suggestions are shooting directions, not filters. Pose checks cover visible shoulders and lowered hands (face landmarks in Close-up). They do not match the example pose exactly. Background objects, expressions and focus are not checked. Angle access is required for the full ready signal. Save session photos before refreshing.</p></details>
+    <details><summary>About the guidance</summary><p class="fine">Guidance adapts to measured light and subject position. Style suggestions are shooting directions, not filters. Basic checks cover visible head and shoulders (face landmarks in Close-up), light, framing and stability. Poses are flexible. Optional cloud AI considers the scene and style; local face checks estimate open eyes and visible detail. These are fallible heuristics, not precise focus or beauty scores. Full AI readiness also needs angle access. Slow, missing or outdated analysis never triggers the AI signal. Save session photos before refreshing.</p></details>
   </div>
 </section>
 <section class="view" id="view-styles" data-view="styles" hidden>
@@ -89,8 +93,16 @@
 <section class="view" id="view-settings" data-view="settings" hidden>
   <header class="vh"><p class="eyebrow">MAKE IT YOURS</p><h1>Settings</h1><p class="sub">Simple controls. Clear choices.</p></header>
   <div class="settings">
-    <details open><summary>Optional AI photo review</summary><div class="settings-body">
-      <p class="fine">Add your own Anthropic API key to request a photo review. Only the photos you choose to review are sent to Anthropic. Live camera guidance stays on this device. Provider charges may apply.</p>
+    <details open><summary>Live AI guidance</summary><div class="settings-body">
+      <p class="fine">Connect your private Frame AI service. Your model API key stays on that server. Enable AI separately in the camera to share small previews with the service and Anthropic. Charges may apply.</p>
+      <label class="field"><span>Service address</span><input type="url" id="aiEndpoint" placeholder="https://your-service.example" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <label class="field"><span>Service access code</span><input type="password" id="aiAccessCode" autocomplete="off" placeholder="Your private service code"></label>
+      <div class="row"><button class="btn btn-primary" id="connectAI">Connect service</button><button class="btn btn-ghost" id="disconnectAI">Disconnect</button></div>
+      <p id="aiConnectionStatus" class="key-status" role="status">No service connected. Basic guidance is available.</p>
+      <p class="fine">The access code stays in memory until you close or reload this page. <a href="./docs/live-ai-setup.md" target="_blank" rel="noopener">Service setup guide</a></p>
+    </div></details>
+    <details><summary>Optional AI photo review</summary><div class="settings-body">
+      <p class="fine">Add your own Anthropic API key to request a photo review. Only the photos you choose to review are sent to Anthropic. Basic live guidance stays on this device; optional cloud guidance has its own connection and consent. Provider charges may apply.</p>
       <label class="field"><span>API key</span><input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       <div class="row"><button class="btn btn-primary" id="saveKey">Save key</button><button class="btn btn-ghost" id="clearKey">Remove key</button></div><p class="key-status" id="keyStatus" role="status"></p>
     </div></details>
@@ -105,6 +117,12 @@
   <button class="tab" data-go="settings"><span class="ti" aria-hidden="true">⚙</span>Settings</button>
 </nav>
 <dialog id="exampleDialog" class="example-dialog" aria-labelledby="exampleTitle"><div class="example-top"><h2 id="exampleTitle">Style example</h2><button class="btn" id="closeExample" aria-label="Close example">Close ✕</button></div><img id="exampleImage" alt=""><p id="exampleDescription"></p><p class="fine">AI-generated example. Lighting and composition inspiration; not an exact pose or filter match.</p></dialog>
+<dialog id="aiConsent" class="example-dialog" aria-labelledby="aiConsentTitle">
+  <h2 id="aiConsentTitle">Enable live AI guidance?</h2>
+  <p>Small camera previews will be sent to <strong id="aiDestination"></strong> and Anthropic to assess this scene and your selected style.</p>
+  <p class="fine">Up to one preview every 5 seconds, with a maximum of 60 previews per session. No microphone audio is sent. Face checks run on your device and download an additional model on first use. Provider charges may apply. Closing the camera stops sharing.</p>
+  <div class="row"><button class="btn btn-primary" id="confirmAI">Enable for this session</button><button class="btn btn-ghost" id="cancelAI">Cancel</button></div>
+</dialog>
 <div class="toast" id="toast" hidden></div>
 <script type="module" src="./js/app.js"></script>
 </body>

@@ -30,6 +30,17 @@ const server = http.createServer((req, res) => {
     await context.addInitScript(() => { if (!localStorage.getItem('haohaopai:prefs')) localStorage.setItem('haohaopai:prefs', JSON.stringify({ track: false, tilt: false, voice: false, grid: true })); });
     page = await context.newPage();
     const errors = [];
+    let aiCalls=0, aiMode='shoot';
+    await page.route('https://frame-ai.test/**', async route => {
+      if(route.request().method()==='OPTIONS')return route.fulfill({status:204,headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'Authorization, Content-Type','Access-Control-Allow-Methods':'GET, POST, OPTIONS'}});
+      const headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};
+      if(route.request().url().endsWith('/health'))return route.fulfill({headers,body:JSON.stringify({status:'ready',protocol:1})});
+      aiCalls++;
+      const body=route.request().postDataJSON();
+      assert.match(body.image,/^data:image\/jpeg;base64,/);
+      if(aiMode==='error')return route.fulfill({status:502,headers,body:'{}'});
+      return route.fulfill({headers,body:JSON.stringify({id:body.id,result:{decision:aiMode,confidence:.91,reason:'The light and background work well together.',action:aiMode==='adjust'?'Move a little to the right':'',actor:aiMode==='adjust'?'camera':'none',checks:{light:'good',composition:'good',background:aiMode==='shoot'?'good':'unknown',pose:'good'}}})});
+    });
     page.on('pageerror', error => { errors.push(error.message); console.error('PAGE ERROR:', error.message); });
     await page.goto(url + '/#debug');
     await page.waitForFunction(() => window.__coach);
@@ -60,8 +71,10 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(() => window.__coach.running && !document.querySelector('#captureNow').disabled);
     assert.equal(await page.locator('#cameraStage').evaluate(el => el.classList.contains('is-ready')), false);
 
+    await page.click('#framingPanel summary');
     await page.click('[data-shot="half"]');
     await page.click('[data-composition="thirds"]');
+    await page.click('#framingPanel summary');
     // The actual bundled runtime must load; fake video is only used as camera input.
     await page.click('#btnTrack');
     await page.waitForFunction(() => window.__coach.tracker.state !== 'loading', null, { timeout: 90000 });
@@ -88,12 +101,12 @@ const server = http.createServer((req, res) => {
       c.reader.readRegion = () => 130;
     });
     await page.waitForFunction(() => window.__coach.ready);
-    assert.equal(await page.locator('#coachTipText').innerText(), 'Ready to shoot');
+    assert.equal(await page.locator('#coachTipText').innerText(), 'Basic checks passed');
     await page.waitForFunction(() => document.querySelector('#toast').hidden);
-    assert.equal(await page.locator('#readinessTitle').innerText(), 'READY TO SHOOT');
+    assert.equal(await page.locator('#readinessTitle').innerText(), 'BASIC CHECKS PASSED');
     assert.equal(await page.locator('#readinessCount').innerText(), '5 / 5 checks');
-    assert.equal(await page.locator('.ready-stamp').evaluate(el => getComputedStyle(el).opacity), '1');
-    assert.equal(await page.locator('#shutterCue').innerText(), 'SHOOT NOW');
+    assert.equal(await page.locator('.ready-stamp').evaluate(el => getComputedStyle(el).opacity), '0');
+    assert.equal(await page.locator('#shutterCue').innerText(), 'Take photo');
     await page.screenshot({ path: 'test-results/camera-ready.png', fullPage: true });
     await page.evaluate(() => { window.__coach.tilt.read = () => null; });
     await page.waitForFunction(() => !window.__coach.ready);
@@ -108,10 +121,72 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.locator('#readinessTitle').innerText(), 'HOLD STEADY');
     await page.waitForFunction(() => window.__coach.ready);
 
+
+    // Connect a mocked gateway, but require real explicit per-session consent.
+    assert.equal(aiCalls,0,'no preview uploads without opt-in');
+    await page.click('[data-go="settings"]');
+    await page.fill('#aiEndpoint','https://frame-ai.test');
+    await page.fill('#aiAccessCode','private-access-code-for-camera-tests-123');
+    await page.click('#connectAI');
+    await page.waitForFunction(()=>document.querySelector('#aiConnectionStatus').textContent.startsWith('Connected.'));
+    assert.equal(await page.locator('#aiAccessCode').inputValue(),'');
+    await page.click('[data-go="coach"]');
+    await page.click('#startCam');
+    await page.waitForFunction(()=>window.__coach.running);
+    await page.click('#btnAI');
+    assert.equal(await page.locator('#aiConsent').isVisible(),true);
+    await page.click('#cancelAI');
+    assert.equal(aiCalls,0,'cancelled consent does not upload');
+    await page.click('#btnAI');
+    await page.click('#confirmAI');
+    await page.waitForFunction(()=>window.__coach.facePulse.state!=='loading',null,{timeout:90000});
+    assert.equal(await page.evaluate(()=>window.__coach.facePulse.state),'ready','real face worker/model loads');
+    assert.equal(aiCalls,0,'unknown face never becomes AI ready');
+    await page.evaluate(()=>{
+      const c=window.__coach;
+      c.facePulse.stop();
+      c.facePulse.sample=()=>{};
+      c._testInstant='good';
+      c.facePulse.read=()=>({state:c._testInstant,text:c._testInstant==='good'?'Eyes open; face detail detected':'Wait for open eyes'});
+      const original=c._sceneSnapshot.bind(c);
+      c._testBackground=100;
+      c._sceneSnapshot=()=>{const s=original();return s&&{...s,signature:Array(192).fill(c._testBackground)};};
+    });
+    await page.waitForFunction(()=>window.__coach.aiReady,null,{timeout:20000});
+    assert.ok(aiCalls>0);
+    assert.equal(await page.locator('#readinessTitle').innerText(),'AI SUGGESTS: SHOOT NOW');
+    assert.equal(await page.locator('#shutterCue').innerText(),'SHOOT NOW');
+    await page.screenshot({path:'test-results/camera-ai-ready.png',fullPage:true});
+    await page.evaluate(()=>window.__coach._testInstant='warn');
+    await page.waitForFunction(()=>!window.__coach.aiReady);
+    assert.equal(await page.locator('.ready-stamp').evaluate(el=>getComputedStyle(el).opacity),'0');
+    assert.equal(await page.locator('#captureNow').isEnabled(),true);
+    await page.evaluate(()=>window.__coach._testInstant='good');
+    await page.waitForFunction(()=>window.__coach.aiReady,null,{timeout:15000});
+    // Background changes invalidate cloud advice even with an unchanged body pose.
+    aiMode='uncertain';
+    await page.evaluate(()=>{window.__coach._testBackground=140;window.__coach.ai.lastAttempt=-Infinity;});
+    await page.waitForFunction(()=>!window.__coach.aiReady);
+    await page.waitForFunction(()=>window.__coach.ai.gate.result?.decision==='uncertain',null,{timeout:15000});
+    assert.equal(await page.locator('#readinessTitle').innerText(),'BASIC CHECKS PASSED');
+    await page.screenshot({path:'test-results/camera-ai-uncertain.png',fullPage:true});
+    aiMode='error';
+    await page.evaluate(()=>{const c=window.__coach;c.ai.invalidate();c.ai.lastAttempt=-Infinity;});
+    await page.waitForFunction(()=>window.__coach.ai.status==='error',null,{timeout:15000});
+    assert.equal(await page.evaluate(()=>window.__coach.aiReady),false);
+    assert.equal(await page.locator('#captureNow').isEnabled(),true);
+    await page.click('#btnAI');
+    assert.equal(await page.evaluate(()=>window.__coach.ai.enabled),false);
+    const callsAtStop=aiCalls;
+    await page.waitForTimeout(700);
+    assert.equal(aiCalls,callsAtStop,'stop sharing stops uploads');
+
     const frame = await page.locator('.camera-preview').boundingBox();
+    const stage = await page.locator('#cameraStage').boundingBox();
     const stack = await page.locator('#camStack').boundingBox();
     const shutter = await page.locator('#captureNow').boundingBox();
-    assert.ok(frame.y + frame.height <= stack.y + 1, 'guidance does not cover saved picture');
+    assert.ok(frame.height >= stage.height * .95, 'camera fills the shooting stage');
+    assert.ok(stack.y > frame.y && stack.y + stack.height <= frame.y + frame.height, 'guidance floats inside the full-screen camera');
     assert.ok(shutter.y + shutter.height <= 844 - 58, 'shutter remains above navigation');
 
     await page.click('#captureNow');
@@ -158,7 +233,7 @@ const server = http.createServer((req, res) => {
     await page.click('#btnStop');
     assert.equal(await page.evaluate(() => window.__coach.stream), null);
     assert.deepEqual(errors, []);
-    console.log('Browser smoke passed: bundled model, readiness UI, capture/download, navigation, phone layouts, cleanup.');
+    console.log('Browser smoke passed: bundled model, readiness UI, capture/download, navigation, phone layouts, cleanup, AI consent/readiness/expiry and errors.');
     await context.close();
   } catch (error) {
     if (page) {

@@ -596,3 +596,52 @@ body.cam-on .toast { bottom: calc(var(--tab-h) + var(--safe-b) + 110px); }
   .scene-checks span { padding:4px 0; font-size:.6rem; }
   .ready-stamp { bottom:14px; padding:7px 12px; font-size:.72rem; }
 }
+
+/* Cloud suggestions are distinct from basic measurements. Keep the status compact. */
+.ai-live-status { margin:0; min-height:18px; font-size:.65rem; color:#bdcfc4; line-height:1.35; }
+.camera-stage[data-readiness="ready"] .ai-live-status { color:#28583c; }
+.camera-stage[data-readiness="basic"] #readinessTitle { color:#c6dfd3; }
+#btnAI[aria-pressed="true"] { background:#22533d; color:#d6ffe8; }
+#aiConsent { max-width:460px; }
+#aiConsent h2 { font-size:1.35rem; }
+#aiDestination { overflow-wrap:anywhere; }
+#aiLiveStatus[hidden] { display:none; }
+.ready-stamp { font-size:.67rem; letter-spacing:.03em; }
+@media(max-height:740px) {
+  .ai-live-status {font-size:.6rem;}
+  .cam-tools {gap:3px;}
+  .cam-tools .cam-btn {font-size:.66rem;padding-inline:4px;}
+}
+
+/* Keep the viewfinder dominant; secondary framing controls live in a compact drawer. */
+.framing-panel { pointer-events:auto; border-top:1px solid #27352e; padding-top:2px; }
+.framing-panel summary { list-style:none; min-height:32px; display:flex; align-items:center; justify-content:space-between; gap:10px; cursor:pointer; color:#9fb2a7; font-size:.68rem; }
+.framing-panel summary::-webkit-details-marker { display:none; }
+.framing-panel summary::after { content:'⌄'; font-size:.85rem; }
+.framing-panel[open] summary::after { content:'⌃'; }
+.framing-panel summary strong { color:#d4e9de; font-weight:600; margin-left:auto; }
+.framing-panel .shot-types { margin-top:5px; }
+.framing-panel .composition-types { margin-top:5px; }
+.camera-stage[data-readiness="ready"] .framing-panel { border-color:#72a889; }
+.camera-stage[data-readiness="ready"] .framing-panel summary,
+.camera-stage[data-readiness="ready"] .framing-panel summary strong { color:#224d35; }
+
+/* Full-screen shooting surface: camera fills the stage and controls float over it. */
+body.cam-on .camera-preview { position:absolute; inset:0; min-height:0; z-index:0; }
+body.cam-on .cam-stack {
+  position:absolute; left:12px; right:12px; bottom:137px; z-index:4;
+  padding:8px 10px; border:1px solid #405047aa; border-radius:14px;
+  background:#101714d9; -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
+}
+body.cam-on .cam-bar {
+  position:absolute; left:0; right:0; bottom:0; z-index:4;
+  background:linear-gradient(to top,#07100dee 68%,#07100d00);
+}
+body.cam-on .coach-tip { min-height:60px; padding-block:6px; }
+body.cam-on #coachTipText { font-size:.95rem; }
+body.cam-on #coachTipReason { font-size:.66rem; }
+body.cam-on .camera-stage[data-readiness="ready"] .cam-stack { background:#b9ffd7eb; }
+@media(max-height:740px) {
+  body.cam-on .cam-stack { bottom:126px; }
+  body.cam-on .coach-tip { min-height:52px; }
+}

@@ -22,6 +22,11 @@ function go(name) {
   window.scrollTo({ top: 0 });
   return Promise.resolve();
 }
+function syncFramingSummary() {
+  const shot=SHOT_TYPES[coach.shotType]?.label || 'Portrait';
+  const composition=coach.composition[0].toUpperCase()+coach.composition.slice(1);
+  $('#framingSummary').textContent=shot+' · '+composition;
+}
 function syncStyle() {
   const name = coach.style?.name || 'Free shooting';
   $('#activeStyleName').textContent = name;
@@ -29,6 +34,7 @@ function syncStyle() {
   $('#styleLiveNote').textContent = coach.style?.setup || 'Choose a style to shape your live guidance.';
   $$('#shotTypes button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.shot === coach.shotType)));
   $$('#compositionTypes button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.composition === coach.composition)));
+  syncFramingSummary();
 }
 function chooseStyle(id) {
   coach.setStyle(id);
@@ -107,6 +113,7 @@ $$('#shotTypes button').forEach(b => {
   b.addEventListener('click', () => {
     coach.setShotType(b.dataset.shot);
     $$('#shotTypes button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    syncFramingSummary();
     buzz(10);
   });
 });
@@ -117,6 +124,7 @@ $$('#compositionTypes button').forEach(b => {
   b.addEventListener('click', () => {
     coach.setComposition(b.dataset.composition);
     $$('#compositionTypes button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    syncFramingSummary();
   });
 });
 
@@ -158,6 +166,37 @@ $('#nativeShot').addEventListener('change', (e) => {
 });
 
 
+
+try { $('#aiEndpoint').value = localStorage.getItem('frame:aiEndpoint') || ''; } catch {}
+function aiConnectionStatus(text) { $('#aiConnectionStatus').textContent = text; }
+$('#connectAI').addEventListener('click', async e => {
+  const button=e.currentTarget;button.disabled=true;aiConnectionStatus('Connecting…');
+  try {
+    await coach.ai.connect($('#aiEndpoint').value.trim(), $('#aiAccessCode').value.trim());
+    $('#aiAccessCode').value='';
+    try { localStorage.setItem('frame:aiEndpoint',coach.ai.endpoint); } catch {}
+    aiConnectionStatus('Connected. Open the camera and tap AI to enable sharing for this session.');
+  } catch(error) { aiConnectionStatus(error.message || 'Unable to connect. Check the service settings.'); }
+  finally {button.disabled=false;}
+});
+$('#disconnectAI').addEventListener('click',()=>{
+  coach.disableAI();coach.ai.disconnect();$('#aiAccessCode').value='';$('#aiEndpoint').value='';
+  try {localStorage.removeItem('frame:aiEndpoint');}catch{}
+  aiConnectionStatus('Disconnected. Basic guidance is available.');
+});
+$('#btnAI').addEventListener('click',()=>{
+  if(coach.ai.enabled){coach.disableAI();return;}
+  if(!coach.ai.endpoint){go('settings');aiConnectionStatus('Connect your service first, then return to the camera and tap AI.');return;}
+  $('#aiDestination').textContent=coach.ai.endpoint;
+  $('#aiConsent').showModal();
+});
+$('#cancelAI').addEventListener('click',()=>$('#aiConsent').close());
+$('#confirmAI').addEventListener('click',()=>{
+  $('#aiConsent').close();
+  if(!coach.running){toast('Open the camera first.');return;}
+  try {coach.enableAI();}catch(error){toast(error.message);}
+});
+
 function refreshKeyStatus() {
   $('#keyStatus').textContent = hasKey() ? 'Key saved. Optional AI review is available.' : 'No key saved. On-device guidance works without one.';
 }
@@ -181,6 +220,9 @@ $('#exportData').addEventListener('click', () => {
 });
 $('#wipeData').addEventListener('click', () => {
   if (!confirm('Reset saved preferences and remove the API key?')) return;
+  coach.disableAI(); coach.ai.disconnect(); $('#aiAccessCode').value=''; $('#aiEndpoint').value='';
+  try {localStorage.removeItem('frame:aiEndpoint');} catch {}
+  aiConnectionStatus('No service connected. Basic guidance is available.');
   store.wipe(); coach.setStyle(null); refreshKeyStatus(); syncStyle(); toast('Preferences reset.');
 });
 if (getStyle(store.prefs.styleId)) coach.setStyle(store.prefs.styleId);

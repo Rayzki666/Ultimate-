@@ -20,15 +20,15 @@ export function assessPose(subjects, shotType = 'half') {
     p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1;
   for (const s of subjects.slice(0, count)) {
     const p = s.pts || [];
-    const required = shotType === 'close' ? [0, 2, 5] : [11, 12, 15, 16];
+    const required = shotType === 'close' ? [] : [11, 12];
     if (shotType === 'full') required.push(31, 32);
-    if (!required.every(i => visible(p[i]))) return { state: 'unknown',
-      reason: shotType === 'close' ? 'Keep the face and both eyes visible for the close-up check.'
-        : 'Keep both shoulders and hands visible' + (shotType === 'full' ? ', including both feet.' : '.') };
-    if (shotType !== 'close' && (p[15].y < p[11].y + .06 || p[16].y < p[12].y + .06))
-      return { state: 'warn', reason: 'For this relaxed pose, lower both hands below the shoulders.' };
+    const headVisible = [0, 2, 5, 7, 8].some(i => visible(p[i]));
+    if (!headVisible || !required.every(i => visible(p[i]))) return { state: 'unknown',
+      reason: shotType === 'close' ? 'Keep the face visible for the close-up check.'
+        : 'Keep the head and both shoulders visible' + (shotType === 'full' ? ', including both feet.' : '.') };
+
   }
-  return { state: 'good', reason: shotType === 'close' ? 'Face landmarks visible.' : 'Shoulders visible and hands lowered.' };
+  return { state: 'good', reason: shotType === 'close' ? 'Face landmarks visible.' : 'Head and shoulders visible; pose is flexible.' };
 }
 export function assessScene({ reading, tilt, subjects = [], shotType = 'half',
   targetX = null, tracking = 'idle', manual = false, mirror = false, style = null }) {

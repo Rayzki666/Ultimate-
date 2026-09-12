@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: '22'
       - name: Guidance and geometry regressions
-        run: node --test tests/guidance.test.mjs
+        run: node --test tests/guidance.test.mjs tests/ai-moment.test.mjs tests/ai-server.test.mjs
       - name: Install isolated browser test tools
         run: |
           npm install --prefix "$RUNNER_TEMP/camera-test" --no-save playwright@1.56.1

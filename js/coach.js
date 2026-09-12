@@ -16,6 +16,8 @@ import { Voice } from './speak.js';
 import { SHOT_TYPES, targetFor, assessScene, ReadinessGate } from './guidance.js';
 import { getStyle, styleHint } from './styles.js';
 import { captureFrame } from './capture.js';
+import { AiMoment } from './ai-moment.js';
+import { FacePulse } from './instant.js';
 import { store } from './store.js';
 
 
@@ -46,6 +48,10 @@ export class Coach {
     this.composition = ['thirds', 'center', 'free'].includes(store.prefs.composition) ? store.prefs.composition : 'thirds';
     this.style = getStyle(store.prefs.styleId);
     this.gate = new ReadinessGate();
+    this.ai = new AiMoment();
+    this.facePulse = new FacePulse();
+    this.aiReady = false;
+    this.instant = { state: 'unknown', text: 'Face checks off' };
     this._targetX = null;
     this._session = 0;
     this._starting = false;
@@ -119,6 +125,13 @@ export class Coach {
   }
 
   stop() {
+    this.ai.disable();
+    this.facePulse.stop();
+    this.aiReady = false;
+    $('#btnAI').textContent = 'AI';
+    $('#btnAI').setAttribute('aria-pressed', 'false');
+    $('#aiLiveStatus').hidden = true;
+    $('#processingLabel').textContent = 'On-device';
     ++this._session;
     this._starting = false;
     this.running = false;
@@ -205,6 +218,8 @@ export class Coach {
   }
 
   disableTracking() {
+    this.ai.invalidate();
+    this.aiReady = false;
     this.tracker.dispose();
     this.subjects = [];
     this.gate.reset();
@@ -226,6 +241,8 @@ export class Coach {
   toggleVoice() { return this._setVoice(!this.voice.enabled); }
 
   setStyle(id) {
+    this.ai.invalidate();
+    this.aiReady = false;
     this.style = getStyle(id);
     this.voice.stop();
     this.ready = false;
@@ -245,6 +262,8 @@ export class Coach {
   }
 
   setShotType(type) {
+    this.ai.invalidate();
+    this.aiReady = false;
     if (SHOT_TYPES[type]) {
       this.shotType = type;
       this._targetX = null;
@@ -254,6 +273,8 @@ export class Coach {
   }
 
   setComposition(value) {
+    this.ai.invalidate();
+    this.aiReady = false;
     if (!['thirds', 'center', 'free'].includes(value)) return;
     this.composition = value;
     this._targetX = null;
@@ -267,6 +288,8 @@ export class Coach {
       throw new Error('The camera is not ready yet. Please wait.');
     }
     const { w, h } = this._box;
+    this.ai.invalidate();
+    this.aiReady = false;
     const shot = await captureFrame(this.video, w, h, this.facing === 'user');
     this.gate.reset();
     this.ready = false;
@@ -320,7 +343,70 @@ export class Coach {
       this.reading = null;
       this.stats = null;
     }
+    if (this.ai.enabled) {
+      this.instant = this.facePulse.read(now, this.subjects.slice(0, this.shotType === 'duo' ? 2 : 1), crop, this.facing === 'user', this.video);
+    }
     this._updateHud();
+    if (this.ai.enabled && this.ready && this.instant.state === 'good' && !this.ai.inFlight &&
+        !this.ai.gate.result && now - this.ai.lastAttempt >= 5000) {
+      const scene = this._sceneSnapshot();
+      if (scene) {
+        try {
+          const image = this._aiPreview(crop);
+          this.ai.analyze(scene, image, { style: this.style?.id || 'free', shotType: this.shotType, composition: this.composition });
+        } catch { this.ai.status = 'error'; this.ai.lastAttempt = now; }
+      }
+    }
+  }
+
+  enableAI() {
+    this.ai.enable();
+    this.facePulse.start();
+    this.gate.reset();
+    $('#btnAI').textContent = 'AI on';
+    $('#btnAI').setAttribute('aria-pressed', 'true');
+    $('#processingLabel').textContent = 'Cloud AI on';
+    $('#aiLiveStatus').hidden = false;
+  }
+
+  disableAI() {
+    this.ai.disable(); this.facePulse.stop(); this.aiReady = false;
+    $('#btnAI').textContent = 'AI';
+    $('#btnAI').setAttribute('aria-pressed', 'false');
+    $('#processingLabel').textContent = 'On-device';
+    $('#aiLiveStatus').hidden = true;
+    this._updateHud();
+  }
+
+  _sceneSnapshot() {
+    if (!this.stats || !this.subjects.length) return null;
+    let signature;
+    try {
+      const data = this.reader.ctx.getImageData(0, 0, 64, 64).data;
+      signature = [];
+      // Block RGB averages detect lighting/background changes, not just moving people.
+      for (let by=0; by<8; by++) for (let bx=0; bx<8; bx++) {
+        const sums=[0,0,0];
+        for(let y=by*8;y<(by+1)*8;y++)for(let x=bx*8;x<(bx+1)*8;x++)
+          for(let k=0;k<3;k++)sums[k]+=data[(y*64+x)*4+k];
+        signature.push(...sums.map(s=>s/64));
+      }
+    } catch { return null; }
+    const {w,h}=this._box;
+    return { context: [this._session,this.facing,this.style?.id,this.shotType,this.composition,w,h].join(':'),
+      people: this.subjects.map(s=>[s.head.x,s.head.y,s.box?.y0,s.box?.y1,
+        ...[11,12,15,16,31,32].flatMap(i=>s.pts?.[i]?.visibility>=.6?[s.pts[i].x,s.pts[i].y]:[-1,-1])]), signature };
+  }
+
+  _aiPreview(crop) {
+    const canvas=document.createElement('canvas'),scale=Math.min(1,640/Math.max(crop.sw,crop.sh));
+    canvas.width=Math.round(crop.sw*scale);canvas.height=Math.round(crop.sh*scale);
+    const ctx=canvas.getContext('2d');
+    if(this.facing==='user'){ctx.translate(canvas.width,0);ctx.scale(-1,1);}
+    ctx.drawImage(this.video,crop.sx,crop.sy,crop.sw,crop.sh,0,0,canvas.width,canvas.height);
+    const image=canvas.toDataURL('image/jpeg',.65);
+    if(image.length>380000)throw Error('Preview too large');
+    return image;
   }
 
   _detect(now) {
@@ -407,20 +493,41 @@ export class Coach {
       targetX: this._targetX, tracking: this.tracker.state,
       manual: !subjects.length && Boolean(this.head), mirror: this.facing === 'user',
     });
-    const wasReady = this.ready;
+    const wasReady = this.aiReady;
     const state = this.gate.update({ now, eligible: assessment.eligible,
       subjects: subjects.slice(0, this.shotType === 'duo' ? 2 : 1) });
     this.ready = state.ready;
     let tip = assessment.tip || (state.ready
-      ? { key: 'ready', sev: 'ready', icon: '✓', text: 'Ready to shoot',
-          reason: t ? 'Measured light and framing are steady. Capture this moment.' : 'Light and framing are steady. Camera angle is not measured.', voice: 'Ready to shoot' }
+      ? { key: 'basic', sev: 'good', icon: '✓', text: 'Basic checks passed',
+          reason: t ? 'Measured light and framing are steady. Capture this moment.' : 'Light and framing are steady. Camera angle is not measured.', voice: '' }
       : { key: 'steady', sev: 'good', icon: '◎', text: 'Hold this frame',
           reason: 'Keep the subject and camera steady for a moment.', voice: '' });
     const styleNote = styleHint(this.style, this.stats, r);
     $('#styleLiveNote').textContent = styleNote;
     if (!assessment.tip && this.style && !state.ready) tip.reason = styleNote;
-    if (state.ready) tip.reason = 'Pose basics, angle, light and framing checked. Press the glowing shutter.';
-    const readiness = state.ready ? 'ready' : assessment.eligible ? 'steady' :
+    if (state.ready) tip.reason = 'Measured light, framing and stability passed. Take a photo anytime.';
+    const scene = this.ai.enabled ? this._sceneSnapshot() : null;
+    if (this.ai.enabled) this.ai.observe(scene, now);
+    const moment = this.ai.enabled ? this.ai.gate.update({scene, now, basicReady:state.ready, instant:this.instant.state}) : {ready:false,result:null};
+    this.aiReady = moment.ready;
+    const messages = {waiting:'AI waiting for a clear, steady frame',analyzing:'AI is reviewing this frame…',error:'AI unavailable — basic checks only',
+      paused:'AI paused after connection errors. Tap AI to retry.',limit:'AI paused after 60 previews. Tap AI to start again.',shoot:'AI found a promising frame',adjust:'AI suggests one adjustment',uncertain:'AI is unsure — shoot when you choose'};
+    const status = $('#aiLiveStatus');
+    if (this.ai.enabled) {
+      status.hidden = false;
+      status.textContent = this.instant.state !== 'good' ? this.instant.text : messages[this.ai.status] || messages.waiting;
+      if (this.ai.status === 'shoot' && !moment.result) status.textContent = 'Scene changed — waiting for a fresh AI check';
+      if (state.ready && moment.result?.decision === 'adjust') {
+        const v=moment.result;
+        tip={key:'ai-adjust-'+v.action,sev:'warn',icon:'↗',text:(v.actor==='camera'?'Camera: ':v.actor==='subject'?'Pose: ':'')+(v.action||v.reason),reason:v.reason,voice:''};
+      } else if (this.aiReady) {
+        tip={key:'ai-shoot',sev:'ready',icon:'✓',text:'AI suggests: SHOOT NOW',reason:moment.result.reason,voice:'This is a good moment to shoot'};
+      }
+    } else if (['limit','paused'].includes(this.ai.status)) {
+      this.facePulse.stop(); status.hidden=false; status.textContent=messages[this.ai.status];
+      $('#btnAI').textContent='AI'; $('#btnAI').setAttribute('aria-pressed','false'); $('#processingLabel').textContent='On-device';
+    }
+    const readiness = this.aiReady ? 'ready' : state.ready ? 'basic' : assessment.eligible ? 'steady' :
       Object.values(assessment.checks).includes('warn') ? 'adjust' : 'incomplete';
     this._showTip(tip, wasReady, state.progress, { ...assessment.checks, steady: state.ready ? 'good' : assessment.eligible ? 'pending' : 'unknown' }, readiness);
   }
@@ -430,7 +537,7 @@ export class Coach {
     if (tip.key !== this._tip.key) this._tip = { key: tip.key, since: now, shown: this._tip.shown };
     const old = this._tip.shown;
     // 只对不同的纠正建议做迟滞；绝不延迟撤销绿灯，也不保留过期的方向。
-    if (old && old.sev === 'warn' && tip.sev === 'warn' &&
+    if (old && !old.key.startsWith('ai-') && !tip.key.startsWith('ai-') && old.sev === 'warn' && tip.sev === 'warn' &&
         old.key !== tip.key && now - this._tip.since < TIP_HOLD_MS &&
         old.key.split('-')[0] !== tip.key.split('-')[0]) tip = old;
     else this._tip.shown = tip;
@@ -440,24 +547,24 @@ export class Coach {
     if ($('#coachTipText').textContent !== tip.text) $('#coachTipText').textContent = tip.text;
     $('#coachTipIcon').textContent = tip.icon;
     $('#coachTipReason').textContent = tip.reason;
-    $('#cameraStage').classList.toggle('is-ready', this.ready);
+    $('#cameraStage').classList.toggle('is-ready', this.aiReady);
     $('#cameraStage').dataset.readiness = readiness;
-    const statusTitles = { ready: 'READY TO SHOOT', steady: 'HOLD STEADY', adjust: 'ONE MORE ADJUSTMENT', incomplete: 'CHECKS INCOMPLETE' };
+    const statusTitles = { ready: 'AI SUGGESTS: SHOOT NOW', basic: 'BASIC CHECKS PASSED', steady: 'HOLD STEADY', adjust: 'ONE MORE ADJUSTMENT', incomplete: 'CHECKS INCOMPLETE' };
     $('#readinessTitle').textContent = statusTitles[readiness];
     $('#readinessCount').textContent = Object.values(checks).filter(s => s === 'good').length + ' / 5 checks';
-    $('#shutterCue').textContent = this.ready ? 'SHOOT NOW' : 'Take photo';
-    $('#captureNow').setAttribute('aria-label', this.ready ? 'Ready — take photo' : 'Take photo');
+    $('#shutterCue').textContent = this.aiReady ? 'SHOOT NOW' : 'Take photo';
+    $('#captureNow').setAttribute('aria-label', this.aiReady ? 'AI suggests now — take photo' : 'Take photo');
     $('#readyProgress').value = progress;
-    $('#readyProgress').setAttribute('aria-valuetext', this.ready ? 'Steady and ready to shoot' : 'Waiting for sustained stability');
-    $('#coachState').textContent = this.ready ? 'Ready to shoot' : tip.key === 'steady' ? 'Hold steady' : 'Live guidance';
+    $('#readyProgress').setAttribute('aria-valuetext', this.aiReady ? 'AI suggests shooting now' : this.ready ? 'Basic checks passed; AI has not suggested shooting' : 'Waiting for sustained stability');
+    $('#coachState').textContent = this.aiReady ? 'AI suggests now' : this.ready ? 'Basic checks passed' : tip.key === 'steady' ? 'Hold steady' : 'Live guidance';
     for (const [key, label] of [['pose', 'Pose'], ['angle', 'Angle'], ['light', 'Light'], ['framing', 'Frame'], ['steady', 'Steady']]) {
       const item = $('#check-' + key);
       item.dataset.state = checks[key];
       item.textContent = (checks[key] === 'good' ? '✓ ' : checks[key] === 'warn' ? '! ' : checks[key] === 'pending' ? '◷ ' : '○ ') + label;
       item.setAttribute('aria-label', label + ': ' + (checks[key] === 'good' ? 'passed' : checks[key] === 'warn' ? 'adjust' : checks[key] === 'pending' ? 'hold steady' : 'not checked'));
     }
-    if ((wasReady && !this.ready) || (old && old.key !== tip.key)) this.voice.stop();
-    if (this.ready && !wasReady) {
+    if ((wasReady && !this.aiReady) || (old && old.key !== tip.key)) this.voice.stop();
+    if (this.aiReady && !wasReady) {
       buzz([25, 45, 25]);
       this.voice.say(tip.voice);
     } else if (!this.ready && (tip.sev === 'warn' || tip.sev === 'bad')) {
@@ -481,6 +588,7 @@ export class Coach {
     if (!this.running) return;
     const now = performance.now();
     this._detect(now);
+    if (this.ai.enabled && this.video.readyState >= 2) this.facePulse.sample(this.video, now);
     this._draw();
     this._raf = requestAnimationFrame(() => this._loop());
   }
@@ -500,7 +608,7 @@ export class Coach {
 
     for (const s of this.subjects) {
       drawSkeleton(g, s.pts, p => p, w, h,
-                   this.ready ? 'rgba(74,222,128,.85)' : 'rgba(255,138,91,.8)');
+                   this.aiReady ? 'rgba(74,222,128,.85)' : 'rgba(255,138,91,.8)');
       this._drawHeadMark(g, w, h, s.head.x, s.head.y, s.headTop);
     }
     if (!this.subjects.length && this.head) {
@@ -536,7 +644,7 @@ export class Coach {
 
   _drawHeadMark(g, w, h, hx, hy, headTop) {
     const x = hx * w, y = hy * h;
-    g.strokeStyle = this.ready ? 'rgba(74,222,128,.95)' : 'rgba(255,138,91,.95)';
+    g.strokeStyle = this.aiReady ? 'rgba(74,222,128,.95)' : 'rgba(255,138,91,.95)';
     g.lineWidth = 2;
     g.beginPath(); g.arc(x, y, 15, 0, Math.PI * 2); g.stroke();
 

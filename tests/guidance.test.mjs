@@ -143,14 +143,14 @@ test('unknown saved style safely falls back and exposure labels match guidance',
   assert.equal(assessScene({ ...base, reading: r }).tip.text, 'Move into more light');
 });
 
-test('pose checks require visible landmarks and lowered hands', () => {
+test('pose checks allow raised or hidden hands while requiring head and shoulders', () => {
   assert.equal(assessPose([subject]).state, 'good');
   assert.equal(assessPose([{ ...subject, pts: [] }]).state, 'unknown');
   const raised = posePoints.map(p => ({ ...p }));
   raised[15].y = .2;
-  assert.equal(assessScene({ ...base, subjects: [{ ...subject, pts: raised }] }).tip.key, 'pose-warn');
+  assert.equal(assessScene({ ...base, subjects: [{ ...subject, pts: raised }] }).eligible, true);
   const hidden = posePoints.map(p => ({ ...p }));
-  hidden[16].visibility = .2;
+  hidden[11].visibility = .2;
   assert.equal(assessScene({ ...base, subjects: [{ ...subject, pts: hidden }] }).eligible, false);
 });
 test('full body checks both feet and close-up uses face landmarks', () => {

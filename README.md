@@ -42,3 +42,8 @@ No build step is required. Host the repository root over HTTPS. For GitHub Pages
 - `tests/browser-smoke.cjs`: real bundled model load, style selection/persistence, English navigation, camera JPEG download and phone-sized layouts.
 - GitHub Actions runs these checks in the cloud. Synthetic video and injected observations are used for repeatable controller tests.
 - Real iPhone permission flows, speed, heat, image quality and download-to-Photos behavior still require device testing.
+
+
+## Optional live AI suggestions
+
+A private gateway and explicit camera-session consent now enable recent scene/style advice. Basic checks and AI shoot suggestions have distinct signals; missing or stale AI results do not turn the AI indicator green. Flexible poses replace the universal lowered-hands rule. The camera now fills the shooting stage while secondary framing choices stay in a compact drawer. The gateway requires deployment and server-side provider credentials before cloud analysis is usable. See [setup, limits and verification](docs/live-ai-setup.md).
