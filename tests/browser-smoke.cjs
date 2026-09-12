@@ -8,7 +8,7 @@ const { chromium } = require('playwright');
 const root = path.resolve(__dirname, '..');
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json',
-  '.wasm': 'application/wasm', '.png': 'image/png', '.task': 'application/octet-stream' };
+  '.jpg': 'image/jpeg', '.wasm': 'application/wasm', '.png': 'image/png', '.task': 'application/octet-stream' };
 const server = http.createServer((req, res) => {
   const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
   const file = path.resolve(root, '.' + (pathname === '/' ? '/index.html' : pathname));
@@ -38,6 +38,14 @@ const server = http.createServer((req, res) => {
     await page.click('[data-go="styles"]');
     assert.equal(await page.locator('[data-style]').count(), 4);
     assert.equal(await page.locator('[data-go="cues"]').count(), 0);
+    await page.waitForFunction(() => [...document.querySelectorAll('.style-art img')].every(img => img.complete && img.naturalWidth >= 1000));
+    for (const id of ['cinematic', 'golden', 'travel', 'editorial']) {
+      await page.click('[data-example="' + id + '"]');
+      assert.equal(await page.locator('#exampleDialog').isVisible(), true);
+      await page.waitForFunction(() => document.querySelector('#exampleImage').complete && document.querySelector('#exampleImage').naturalWidth >= 1000);
+      await page.click('#closeExample');
+      assert.equal(await page.locator('#exampleDialog').isVisible(), false);
+    }
     await page.screenshot({ path: 'test-results/styles-lookbook.png', fullPage: true });
     await page.click('[data-style="editorial"]');
     assert.equal(await page.evaluate(() => window.__coach.composition), 'center');
@@ -64,11 +72,16 @@ const server = http.createServer((req, res) => {
     await page.evaluate(() => {
       const c = window.__coach;
       c.tracker.state = 'ready';
+      c.tilt.read = () => ({ roll: 0, pitch: 5, rollValid: true });
+      c._testWristOffset = 0;
       c._detect = () => {
         c._lastPoseAt = performance.now();
+        const pts = Array.from({ length: 33 }, () => ({ x: .33, y: .5, visibility: 0 }));
+        for (const [i,x,y] of [[0,.33,.22],[2,.31,.2],[5,.35,.2],[11,.26,.35],[12,.4,.35],[15,.27,.61],[16,.39,.61],[31,.28,.9],[32,.39,.9]])
+          pts[i] = { x: x + (i === 15 ? c._testWristOffset : 0), y, visibility: .95 };
         c.subjects = [{ head: { x: 1/3, y: .22 }, headTop: .16,
           box: { x0: .2, y0: .16, x1: .45, y1: .9 }, face: { x0: .29, y0: .18, x1: .37, y1: .26 },
-          visible: { feet: true }, crop: null, pts: [] }];
+          visible: { feet: true }, crop: null, pts }];
       };
       c.reader.read = () => ({ mean: 130, center: 130, outer: 130, left: 130, right: 130,
         top: 130, bottom: 130, clipHigh: 0, clipLow: 0, warmth: 0, backlit: 0, sideBias: 0 });
@@ -77,7 +90,23 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(() => window.__coach.ready);
     assert.equal(await page.locator('#coachTipText').innerText(), 'Ready to shoot');
     await page.waitForFunction(() => document.querySelector('#toast').hidden);
+    assert.equal(await page.locator('#readinessTitle').innerText(), 'READY TO SHOOT');
+    assert.equal(await page.locator('#readinessCount').innerText(), '5 / 5 checks');
+    assert.equal(await page.locator('.ready-stamp').evaluate(el => getComputedStyle(el).opacity), '1');
+    assert.equal(await page.locator('#shutterCue').innerText(), 'SHOOT NOW');
     await page.screenshot({ path: 'test-results/camera-ready.png', fullPage: true });
+    await page.evaluate(() => { window.__coach.tilt.read = () => null; });
+    await page.waitForFunction(() => !window.__coach.ready);
+    assert.equal(await page.locator('#cameraStage').evaluate(el => el.classList.contains('is-ready')), false);
+    assert.equal(await page.locator('#readinessTitle').innerText(), 'CHECKS INCOMPLETE');
+    assert.equal(await page.locator('#captureNow').isEnabled(), true);
+    await page.screenshot({ path: 'test-results/camera-incomplete.png', fullPage: true });
+    await page.evaluate(() => { window.__coach.tilt.read = () => ({ roll: 0, pitch: 5, rollValid: true }); });
+    await page.waitForFunction(() => window.__coach.ready);
+    await page.evaluate(() => { window.__coach._testWristOffset = .08; });
+    await page.waitForFunction(() => !window.__coach.ready);
+    assert.equal(await page.locator('#readinessTitle').innerText(), 'HOLD STEADY');
+    await page.waitForFunction(() => window.__coach.ready);
 
     const frame = await page.locator('.camera-preview').boundingBox();
     const stack = await page.locator('#camStack').boundingBox();

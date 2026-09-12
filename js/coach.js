@@ -148,6 +148,9 @@ export class Coach {
     $('#camStack').hidden = true;
     document.body.classList.remove('cam-on');
     $('#cameraStage')?.classList.remove('is-ready');
+    $('#cameraStage').dataset.readiness = 'incomplete';
+    $('#shutterCue').textContent = 'Take photo';
+    $('#captureNow').setAttribute('aria-label', 'Take photo');
     $('#captureNow').disabled = true;
     $('#btnTrack').disabled = false;
     $('#btnTrack').textContent = 'Detect';
@@ -415,11 +418,14 @@ export class Coach {
           reason: 'Keep the subject and camera steady for a moment.', voice: '' });
     const styleNote = styleHint(this.style, this.stats, r);
     $('#styleLiveNote').textContent = styleNote;
-    if (!assessment.tip && this.style) tip.reason = styleNote;
-    this._showTip(tip, wasReady, state.progress, assessment.checks);
+    if (!assessment.tip && this.style && !state.ready) tip.reason = styleNote;
+    if (state.ready) tip.reason = 'Pose basics, angle, light and framing checked. Press the glowing shutter.';
+    const readiness = state.ready ? 'ready' : assessment.eligible ? 'steady' :
+      Object.values(assessment.checks).includes('warn') ? 'adjust' : 'incomplete';
+    this._showTip(tip, wasReady, state.progress, { ...assessment.checks, steady: state.ready ? 'good' : assessment.eligible ? 'pending' : 'unknown' }, readiness);
   }
 
-  _showTip(tip, wasReady, progress, checks) {
+  _showTip(tip, wasReady, progress, checks, readiness) {
     const now = performance.now();
     if (tip.key !== this._tip.key) this._tip = { key: tip.key, since: now, shown: this._tip.shown };
     const old = this._tip.shown;
@@ -435,13 +441,20 @@ export class Coach {
     $('#coachTipIcon').textContent = tip.icon;
     $('#coachTipReason').textContent = tip.reason;
     $('#cameraStage').classList.toggle('is-ready', this.ready);
+    $('#cameraStage').dataset.readiness = readiness;
+    const statusTitles = { ready: 'READY TO SHOOT', steady: 'HOLD STEADY', adjust: 'ONE MORE ADJUSTMENT', incomplete: 'CHECKS INCOMPLETE' };
+    $('#readinessTitle').textContent = statusTitles[readiness];
+    $('#readinessCount').textContent = Object.values(checks).filter(s => s === 'good').length + ' / 5 checks';
+    $('#shutterCue').textContent = this.ready ? 'SHOOT NOW' : 'Take photo';
+    $('#captureNow').setAttribute('aria-label', this.ready ? 'Ready — take photo' : 'Take photo');
     $('#readyProgress').value = progress;
     $('#readyProgress').setAttribute('aria-valuetext', this.ready ? 'Steady and ready to shoot' : 'Waiting for sustained stability');
     $('#coachState').textContent = this.ready ? 'Ready to shoot' : tip.key === 'steady' ? 'Hold steady' : 'Live guidance';
-    for (const [key, label] of [['light', 'Light'], ['framing', 'Frame'], ['angle', 'Angle']]) {
+    for (const [key, label] of [['pose', 'Pose'], ['angle', 'Angle'], ['light', 'Light'], ['framing', 'Frame'], ['steady', 'Steady']]) {
       const item = $('#check-' + key);
       item.dataset.state = checks[key];
-      item.textContent = label + (checks[key] === 'good' ? ' ✓' : checks[key] === 'warn' ? ' · Adjust' : ' · —');
+      item.textContent = (checks[key] === 'good' ? '✓ ' : checks[key] === 'warn' ? '! ' : checks[key] === 'pending' ? '◷ ' : '○ ') + label;
+      item.setAttribute('aria-label', label + ': ' + (checks[key] === 'good' ? 'passed' : checks[key] === 'warn' ? 'adjust' : checks[key] === 'pending' ? 'hold steady' : 'not checked'));
     }
     if ((wasReady && !this.ready) || (old && old.key !== tip.key)) this.voice.stop();
     if (this.ready && !wasReady) {

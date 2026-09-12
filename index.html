@@ -19,6 +19,8 @@
     <div class="camera-preview">
       <video id="cam" playsinline muted autoplay></video>
       <canvas id="overlay" aria-label="Subject and composition guides"></canvas>
+      <div class="ready-corners" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div class="ready-stamp" aria-hidden="true"><span>✓</span> READY TO SHOOT</div>
       <div class="hud" id="hud" hidden>
         <div class="live-heading"><span class="live-dot"></span><span id="coachState">Live guidance</span><span class="local-label">On-device</span></div>
         <div class="hud-top">
@@ -43,10 +45,11 @@
     <div class="cam-error" id="camError" hidden><p id="camErrorMsg"></p><button class="btn" id="retryCam">Try again</button></div>
     <div class="cam-stack" id="camStack" hidden>
       <button class="active-style" id="activeStyle" aria-label="Change shooting style"><span id="activeStyleName">Free shooting</span><span>Change ↗</span></button>
-      <div class="scene-checks" aria-label="Measured conditions">
-        <span id="check-light" data-state="unknown">Light · —</span><span id="check-framing" data-state="unknown">Frame · —</span><span id="check-angle" data-state="unknown">Angle · —</span>
-        <progress id="readyProgress" max="1" value="0" aria-label="Steadiness"></progress>
+      <div class="readiness-heading"><span id="readinessTitle" role="status" aria-live="polite">CHECKS INCOMPLETE</span><span id="readinessCount">0 / 5 checks</span></div>
+      <div class="scene-checks" aria-label="Readiness checks">
+        <span id="check-pose" data-state="unknown">○ Pose</span><span id="check-angle" data-state="unknown">○ Angle</span><span id="check-light" data-state="unknown">○ Light</span><span id="check-framing" data-state="unknown">○ Frame</span><span id="check-steady" data-state="unknown">○ Steady</span>
       </div>
+      <progress id="readyProgress" max="1" value="0" aria-label="Steadiness"></progress>
       <div class="coach-tip" id="coachTip" hidden><span class="coach-tip-icon" id="coachTipIcon" aria-hidden="true"></span><div><strong id="coachTipText" role="status" aria-live="polite"></strong><p id="coachTipReason"></p></div></div>
       <div class="shot-types" id="shotTypes" role="group" aria-label="Framing">
         <button data-shot="full">Full body</button><button data-shot="half" aria-pressed="true">Portrait</button><button data-shot="close">Close-up</button><button data-shot="duo">Together</button>
@@ -61,7 +64,7 @@
       </div>
       <div class="shutter-row">
         <button class="cam-btn gallery-button" id="viewCaptures" disabled aria-label="View this session"><span id="captureCount">0</span><span>This session</span></button>
-        <button class="shutter-button" id="captureNow" disabled aria-label="Take photo"><span></span></button>
+        <div class="shutter-control"><button class="shutter-button" id="captureNow" disabled aria-label="Take photo"><span></span></button><span id="shutterCue" aria-hidden="true">Take photo</span></div>
         <button class="cam-btn" id="btnFlip" aria-label="Switch camera">Flip ↻</button>
       </div>
       <div class="capture-note"><span id="captureStatus" role="status">Shoot anytime · Green means steady</span><label class="native-camera-link" tabindex="0" role="button" id="btnShutter">Native camera<input type="file" accept="image/*" capture="environment" id="nativeShot" hidden></label></div>
@@ -69,14 +72,14 @@
   </div>
   <div class="coach-help" id="coachHelp">
     <p class="style-live-note" id="styleLiveNote">Choose a style to shape your live guidance.</p>
-    <details><summary>About the guidance</summary><p class="fine">Guidance adapts to measured light and subject position. Style suggestions are shooting directions, not filters. Background objects, expressions and focus are not checked. Save session photos before refreshing.</p></details>
+    <details><summary>About the guidance</summary><p class="fine">Guidance adapts to measured light and subject position. Style suggestions are shooting directions, not filters. Pose checks cover visible shoulders and lowered hands (face landmarks in Close-up). They do not match the example pose exactly. Background objects, expressions and focus are not checked. Angle access is required for the full ready signal. Save session photos before refreshing.</p></details>
   </div>
 </section>
 <section class="view" id="view-styles" data-view="styles" hidden>
   <header class="vh style-header"><p class="eyebrow">THE LOOKBOOK</p><h1>A mood for every frame.</h1><p class="sub">Choose your intention. We will guide the shot.</p></header>
   <div class="style-intro"><span>01 / CHOOSE A LOOK</span><span>02 / FOLLOW THE SCENE</span></div>
   <div class="style-list" id="styleList"></div>
-  <div class="style-footer"><button class="btn btn-ghost" id="clearStyle">Shoot without a preset</button><p class="fine">Illustrations show framing ideas. Presets guide how you shoot; they do not apply color filters.</p></div>
+  <div class="style-footer"><button class="btn btn-ghost" id="clearStyle">Shoot without a preset</button><p class="fine">AI-generated example photos show each look. Presets guide your shooting; color grading and exact pose matching are not automatic.</p></div>
 </section>
 <section class="view" id="view-review" data-view="review" hidden>
   <header class="vh"><p class="eyebrow">YOUR FRAMES</p><h1>Photos</h1><p class="sub">Keep the moments that feel like you.</p></header>
@@ -101,6 +104,7 @@
   <button class="tab" data-go="review"><span class="ti" aria-hidden="true">▤</span>Photos</button>
   <button class="tab" data-go="settings"><span class="ti" aria-hidden="true">⚙</span>Settings</button>
 </nav>
+<dialog id="exampleDialog" class="example-dialog" aria-labelledby="exampleTitle"><div class="example-top"><h2 id="exampleTitle">Style example</h2><button class="btn" id="closeExample" aria-label="Close example">Close ✕</button></div><img id="exampleImage" alt=""><p id="exampleDescription"></p><p class="fine">AI-generated example. Lighting and composition inspiration; not an exact pose or filter match.</p></dialog>
 <div class="toast" id="toast" hidden></div>
 <script type="module" src="./js/app.js"></script>
 </body>

@@ -12,9 +12,27 @@ export function targetFor(composition, shotType, x = .5) {
 }
 const advice = (key, text, reason, icon = '↔', sev = 'warn') =>
   ({ key, text, reason, icon, sev, voice: text });
+// Checks only visible, observable pose basics; never claims an exact example match.
+export function assessPose(subjects, shotType = 'half') {
+  const count = shotType === 'duo' ? 2 : 1;
+  if (subjects.length < count) return { state: 'unknown', reason: 'Bring the required people into view.' };
+  const visible = p => p && p.visibility >= .6 && Number.isFinite(p.x) && Number.isFinite(p.y) &&
+    p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1;
+  for (const s of subjects.slice(0, count)) {
+    const p = s.pts || [];
+    const required = shotType === 'close' ? [0, 2, 5] : [11, 12, 15, 16];
+    if (shotType === 'full') required.push(31, 32);
+    if (!required.every(i => visible(p[i]))) return { state: 'unknown',
+      reason: shotType === 'close' ? 'Keep the face and both eyes visible for the close-up check.'
+        : 'Keep both shoulders and hands visible' + (shotType === 'full' ? ', including both feet.' : '.') };
+    if (shotType !== 'close' && (p[15].y < p[11].y + .06 || p[16].y < p[12].y + .06))
+      return { state: 'warn', reason: 'For this relaxed pose, lower both hands below the shoulders.' };
+  }
+  return { state: 'good', reason: shotType === 'close' ? 'Face landmarks visible.' : 'Shoulders visible and hands lowered.' };
+}
 export function assessScene({ reading, tilt, subjects = [], shotType = 'half',
   targetX = null, tracking = 'idle', manual = false, mirror = false, style = null }) {
-  const checks = { light: 'unknown', framing: 'unknown',
+  const checks = { light: 'unknown', framing: 'unknown', pose: 'unknown',
     angle: tilt?.rollValid && Number.isFinite(tilt.roll) && Number.isFinite(tilt.pitch) ? 'good' : 'unknown' };
   const result = tip => ({ tip, checks, eligible: !tip && !manual && subjects.length > 0 });
   if (!reading) return result(advice('waiting', 'Reading the scene', 'Waiting for a fresh camera frame.', '◌', 'good'));
@@ -107,6 +125,12 @@ export function assessScene({ reading, tilt, subjects = [], shotType = 'half',
       'Bring ' + (shotType === 'duo' ? 'the midpoint between you' : 'the subject') + ' toward the guide.', dir === 'right' ? '→' : '←'));
   }
   checks.framing = 'good';
+  const pose = assessPose(subjects, shotType);
+  checks.pose = pose.state;
+  if (pose.state !== 'good') return result(advice('pose-' + pose.state,
+    pose.state === 'unknown' ? 'Make the pose visible' : 'Relax your arms', pose.reason, '◎', pose.state === 'unknown' ? 'good' : 'warn'));
+  if (checks.angle !== 'good') return result(advice('angle-unchecked', 'Check the camera angle',
+    'Tap Level and allow motion access. Without angle readings, full readiness cannot be confirmed. You can still shoot.', '↶', 'good'));
   return result(null);
 }
 export class ReadinessGate {
@@ -114,13 +138,22 @@ export class ReadinessGate {
   reset() { this.since = null; this.lastAt = null; this.anchor = null; }
   update({ now, eligible, subjects = [] }) {
     const points = subjects.map(s => ({ x: s.head.x, y: s.head.y,
-      height: s.box ? s.box.y1 - s.box.y0 : 0 })).sort((a, b) => a.x - b.x);
+      height: s.box ? s.box.y1 - s.box.y0 : 0,
+      joints: [11, 12, 15, 16, 31, 32].map(i => {
+        const p = s.pts?.[i];
+        return p && p.visibility >= .6 && Number.isFinite(p.x) && Number.isFinite(p.y) &&
+          p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1 ? { x: p.x, y: p.y } : null;
+      }) })).sort((a, b) => a.x - b.x);
     if (!eligible || !points.length || points.some(p => !Number.isFinite(p.x + p.y + p.height))) {
       this.reset(); return { ready: false, progress: 0 };
     }
     const moved = !this.anchor || this.anchor.length !== points.length || points.some((p, i) =>
       Math.hypot(p.x - this.anchor[i].x, p.y - this.anchor[i].y) > 0.018 ||
-      Math.abs(p.height - this.anchor[i].height) > 0.035);
+      Math.abs(p.height - this.anchor[i].height) > 0.035 ||
+      p.joints.some((joint, j) => {
+        const before = this.anchor[i].joints[j];
+        return Boolean(joint) !== Boolean(before) || (joint && before && Math.hypot(joint.x - before.x, joint.y - before.y) > .035);
+      }));
     if (this.lastAt === null || now - this.lastAt > 600 || now < this.lastAt || moved) {
       this.since = now;
       this.anchor = points;

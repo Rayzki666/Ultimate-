@@ -12,7 +12,7 @@ Choose **Styles → Use this look → Open camera**, then follow one live direct
 | Travel Story | Full body, thirds | Allows a smaller subject and requests more space for the environment; bright upper frames trigger a suggestion to include less sky. |
 | Editorial | Full body, center | Requests more subject presence and a deliberate central composition. |
 
-The lookbook uses vector composition studies. Styles are shooting intentions, **not color filters**. You can override framing and composition or return to free shooting. Selection persists in this browser. Each in-app photo records its shooting style for the current session.
+The lookbook contains four AI-generated photographic examples stored in the repository. Tap an example to view it at full size. Styles are shooting intentions, **not color filters**. You can override framing and composition or return to free shooting. Selection persists in this browser. Each in-app photo records its shooting style for the current session.
 
 ## Focused interface
 
@@ -22,9 +22,9 @@ Live camera text, errors, voice guidance, photo review and the web app manifest 
 
 ## What the camera measures
 
-On-device MediaPipe body landmarks, pixel brightness and available device orientation. The first model load is about 18 MB. One priority instruction handles exposure, missing people, cropping, angle, style-specific subject scale and composition. After about 1.1 seconds of continuous stability, the frame turns green. New movement, stale frames and lost subjects reset it.
+On-device MediaPipe body landmarks, pixel brightness and available device orientation. The first model load is about 18 MB. One priority instruction handles exposure, missing people, cropping, angle, style-specific subject scale and composition. Full readiness requires five measured checks: pose basics, camera angle, light, framing and sustained stability. After about 1.1 seconds of stability, a high-contrast READY TO SHOOT state lights the guidance panel, viewfinder corners and shutter. Missing orientation readings or pose landmarks prevent full readiness; manual capture is still available. Head, scale or visible limb movement, stale frames and lost subjects reset it.
 
-Styles use only measured signals. Background objects, expressions, actual focus and semantic scene understanding are not detected. A warm-toned frame is not proof of sunset. Green means the measured conditions are satisfied, not that the photo is perfect.
+Styles use only measured signals. Background objects, expressions, actual focus and semantic scene understanding are not detected. A warm-toned frame is not proof of sunset. Pose basics require visible shoulders and hands below shoulder level; full-body framing also requires both feet. Close-ups check face landmarks instead. This does not match the example pose exactly. Green means the measured conditions are satisfied, not that the photo is perfect.
 
 ## Photos and privacy
 
@@ -34,7 +34,7 @@ Up to 20 photos are held in the page session. **Save photos before refreshing.**
 
 ## Deployment and updates
 
-No build step is required. Host the repository root over HTTPS. For GitHub Pages, keep the selected implementation branch as the source. After deployment, save session photos, then refresh Safari to load the latest app. Service-worker shell version: v5.
+No build step is required. Host the repository root over HTTPS. For GitHub Pages, keep the selected implementation branch as the source. After deployment, save session photos, then refresh Safari to load the latest app. Service-worker shell version: v6.
 
 ## Validation
 

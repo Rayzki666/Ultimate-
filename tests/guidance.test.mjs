@@ -2,10 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../js/guidance.js', import.meta.url), 'utf8');
-const { assessScene, ReadinessGate, targetFor } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+const { assessScene, assessPose, ReadinessGate, targetFor } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
 const frameSource = await readFile(new URL('../js/frame.js', import.meta.url), 'utf8');
 const { coverRect, regionFromBox, interpret } = await import('data:text/javascript;base64,' + Buffer.from(frameSource).toString('base64'));
-const subject = { head: { x: 1 / 3, y: .22 }, headTop: .16,
+const posePoints = Array.from({ length: 33 }, () => ({ x: .33, y: .5, visibility: 0 }));
+for (const [i,x,y] of [[0,.33,.22],[2,.31,.2],[5,.35,.2],[11,.26,.35],[12,.4,.35],[15,.27,.61],[16,.39,.61],[31,.28,.9],[32,.39,.9]])
+  posePoints[i] = { x, y, visibility: .95 };
+const subject = { pts: posePoints, head: { x: 1 / 3, y: .22 }, headTop: .16,
   box: { x0: .2, y0: .16, x1: .45, y1: .9 }, visible: { feet: true }, crop: null };
 const reading = { exposure: { level: 'good', label: 'Balanced' }, light: { level: 'good', label: 'Flat' }, notes: [] };
 const base = { reading, tilt: { roll: 0, pitch: 5, rollValid: true }, subjects: [subject],
@@ -47,10 +50,12 @@ test('bad exposure overrides composition and angle corrections', () => {
     reading: { ...reading, exposure: { level: 'bad', label: 'Too dark' } } };
   assert.equal(assessScene(scene).tip.key, 'exposure');
 });
-test('unknown angles remain unknown and aesthetic notes do not block capture', () => {
+test('unknown angles block full readiness while aesthetic notes alone do not', () => {
   const result = assessScene({ ...base, tilt: null, reading: { ...reading, notes: ['Warm tones'] } });
   assert.equal(result.checks.angle, 'unknown');
-  assert.equal(result.eligible, true);
+  assert.equal(result.eligible, false);
+  assert.equal(result.tip.key, 'angle-unchecked');
+  assert.equal(assessScene({ ...base, reading: { ...reading, notes: ['Warm tones'] } }).eligible, true);
 });
 test('full body requires visible feet', () => {
   assert.equal(assessScene({ ...base, shotType: 'full', subjects: [{ ...subject, visible: { feet: false } }] }).tip.key, 'feet-missing');
@@ -136,4 +141,29 @@ test('unknown saved style safely falls back and exposure labels match guidance',
   const r = interpret({ mean: 30, clipHigh: 0, sideBias: 0, top: 30, bottom: 30, warmth: 0, clipLow: 0, outer: 30, backlit: 0 });
   assert.equal(r.exposure.label, 'Too dark');
   assert.equal(assessScene({ ...base, reading: r }).tip.text, 'Move into more light');
+});
+
+test('pose checks require visible landmarks and lowered hands', () => {
+  assert.equal(assessPose([subject]).state, 'good');
+  assert.equal(assessPose([{ ...subject, pts: [] }]).state, 'unknown');
+  const raised = posePoints.map(p => ({ ...p }));
+  raised[15].y = .2;
+  assert.equal(assessScene({ ...base, subjects: [{ ...subject, pts: raised }] }).tip.key, 'pose-warn');
+  const hidden = posePoints.map(p => ({ ...p }));
+  hidden[16].visibility = .2;
+  assert.equal(assessScene({ ...base, subjects: [{ ...subject, pts: hidden }] }).eligible, false);
+});
+test('full body checks both feet and close-up uses face landmarks', () => {
+  const hidden = posePoints.map(p => ({ ...p })); hidden[32].visibility = .2;
+  assert.equal(assessPose([{ ...subject, pts: hidden }], 'full').state, 'unknown');
+  assert.equal(assessPose([{ ...subject, pts: posePoints.slice(0, 6) }], 'close').state, 'good');
+});
+test('invalid angle readings cannot turn the complete indicator green', () => {
+  for (const tilt of [null, { roll: 0, pitch: NaN, rollValid: true }, { roll: NaN, pitch: 5, rollValid: true }, { roll: 0, pitch: 5, rollValid: false }])
+    assert.equal(assessScene({ ...base, tilt }).eligible, false);
+});
+test('arm movement resets stability even when head and body size stay fixed', () => {
+  const gate = new ReadinessGate(); stable(gate);
+  const moved = posePoints.map(p => ({ ...p })); moved[15].x += .08;
+  assert.equal(gate.update({ now: 1320, eligible: true, subjects: [{ ...subject, pts: moved }] }).ready, false);
 });
