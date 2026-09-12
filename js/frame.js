@@ -147,67 +147,27 @@ export function regionFromBox(box, crop, mirror = false) {
  */
 export function interpret(stats, faceLuma = null) {
   const notes = [];
-
-  // ── 曝光 ──
   let exposure;
-  if (stats.mean < 42) {
-    exposure = { level: 'bad', label: '太暗', tip: '光不够。找个有光的地方，或者让她靠近窗户、路灯、橱窗。', voice: '太暗了，去找光' };
-  } else if (stats.clipHigh > 0.16) {
-    exposure = { level: 'bad', label: '过曝', tip: '亮部已经死白了。点一下屏幕上她的脸对焦，然后手指往下滑降低曝光。', voice: '过曝了，往下滑降曝光' };
-  } else if (stats.mean > 196) {
-    exposure = { level: 'warn', label: '偏亮', tip: '整体偏亮，往下滑一点曝光会更耐看。', voice: '偏亮，降一点曝光' };
-  } else if (stats.mean < 70) {
-    exposure = { level: 'warn', label: '偏暗', tip: '有点暗。手机会自动提高感光度，画面会发糊有噪点——找点光。', voice: '有点暗，找点光' };
-  } else {
-    exposure = { level: 'good', label: '正常', tip: '' };
-  }
-
-  // ── 光位 ──
-  // 认出人之后就用「她脸上的光」对比整个画面，比拿画面中心当主体准得多。
+  if (stats.mean < 42) exposure = { level: 'bad', label: 'Too dark', tip: 'Move closer to a window or another light source.' };
+  else if (stats.clipHigh > .16) exposure = { level: 'bad', label: 'Clipped', tip: 'Bright detail is being lost. Try softer light or a less bright background.' };
+  else if (stats.mean > 196) exposure = { level: 'warn', label: 'Bright', tip: 'The frame is bright. Try moving away from direct light.' };
+  else if (stats.mean < 70) exposure = { level: 'warn', label: 'Dim', tip: 'More light will help reduce noise and motion blur.' };
+  else exposure = { level: 'good', label: 'Balanced', tip: '' };
   const faceGap = faceLuma === null ? null : stats.mean - faceLuma;
-
   let light;
-  if (faceGap !== null && faceGap > 34 && stats.mean > 108) {
-    light = {
-      level: 'warn', label: '逆光',
-      tip: '她脸比背景暗一大截。点她的脸对焦测光——背景会过曝，但人是对的。',
-      voice: '逆光，点她的脸测光',
-    };
-  } else if (faceGap !== null && faceGap < -46 && faceLuma > 224) {
-    light = {
-      level: 'warn', label: '脸过曝',
-      tip: '光太直接了，她脸上已经死白。让她转开一点，或者挪到阴影边缘。',
-      voice: '脸过曝了，往阴影里挪',
-    };
-  } else if (faceGap === null && stats.backlit > 42 && stats.outer > 118) {
-    light = {
-      level: 'warn', label: '逆光',
-      tip: '逆光。要么点她的脸对焦测光（背景会过曝，但人是对的），要么就干脆拍剪影和发丝光。',
-      voice: '逆光，点她的脸测光',
-    };
-  } else if (Math.abs(stats.sideBias) > 24) {
-    const side = stats.sideBias > 0 ? '右' : '左';
-    light = {
-      level: 'good', label: `侧光·${side}`,
-      tip: `光从${side}边来。让她的脸稍微转向${side}边一点，鼻子的影子会顺过来，脸会立体。`,
-    };
-  } else if (stats.mean > 150 && stats.clipHigh < 0.03 && Math.abs(stats.sideBias) < 12) {
-    light = { level: 'good', label: '柔光', tip: '这是最好拍的光，随便拍都不难看。' };
-  } else {
-    light = { level: 'good', label: '平光', tip: '' };
-  }
-
-  // ── 附注 ──
-  if (stats.top - stats.bottom > 78) {
-    notes.push('天空比地面亮很多。要么少给天空，要么就让天空过曝、保住人脸。');
-  }
-  if (stats.warmth > 34) {
-    notes.push('环境光偏暖（钨丝灯或夕阳），肤色会好看，别开白平衡自动纠偏。');
-  }
-  if (stats.clipLow > 0.34 && stats.mean < 90) {
-    notes.push('大片死黑。暗部细节已经没了，靠后期救不回来。');
-  }
-
+  if ((faceGap !== null && faceGap > 34 && stats.mean > 108) ||
+      (faceGap === null && stats.backlit > 42 && stats.outer > 118))
+    light = { level: 'warn', label: 'Backlit', tip: 'The subject area is darker than the background. Try turning toward the light.' };
+  else if (faceGap !== null && faceGap < -46 && faceLuma > 224)
+    light = { level: 'warn', label: 'Face clipped', tip: 'The face is very bright. Try the edge of the shade.' };
+  else if (Math.abs(stats.sideBias) > 24)
+    light = { level: 'good', label: 'Uneven', tip: 'Brightness differs across the frame. Check the light on the face.' };
+  else if (stats.mean > 150 && stats.clipHigh < .03 && Math.abs(stats.sideBias) < 12)
+    light = { level: 'good', label: 'Even', tip: 'The measured light is fairly even.' };
+  else light = { level: 'good', label: 'Flat', tip: '' };
+  if (stats.top - stats.bottom > 78) notes.push('The upper frame is much brighter. Including less of it may help preserve detail.');
+  if (stats.warmth > 34) notes.push('Warm tones are present in the frame.');
+  if (stats.clipLow > .34 && stats.mean < 90) notes.push('Large dark areas have little detail. Try adding light.');
   return { exposure, light, notes };
 }
 

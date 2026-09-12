@@ -81,11 +81,11 @@ export class SubjectTracker {
       const src = (await simdSupported()) ? LOCAL : REMOTE;
       this.source = src === LOCAL ? 'local' : 'cdn';
 
-      onProgress?.('正在加载识别模型（首次约 18MB，之后走缓存）');
+      onProgress?.('Loading the subject model (about 18 MB on first use)');
       const { FilesetResolver, PoseLandmarker } = await import(src.bundle);
       const fileset = await FilesetResolver.forVisionTasks(src.wasm);
 
-      onProgress?.('正在启动');
+      onProgress?.('Starting detection');
       const options = {
         baseOptions: { modelAssetPath: src.model, delegate: 'GPU' },
         runningMode: 'VIDEO',
@@ -248,11 +248,11 @@ function readCrop(pts) {
     return ps.length > 0 && ps.some(p => p.y <= 1);
   };
 
-  if (near(LM.ankleL, LM.ankleR)) return { at: 'ankle', text: '画面下沿正好切在脚踝上。要么把脚整个给进来，要么往上收到小腿肚以上。' };
-  if (near(LM.kneeL, LM.kneeR))   return { at: 'knee',  text: '下沿正好切在膝盖上，这是最难看的一刀。往下让一点或者收到大腿中段。' };
-  if (near(LM.wristL, LM.wristR)) return { at: 'wrist', text: '下沿切在手腕上，手会像断了。往下让一点把手给全。' };
+  if (near(LM.ankleL, LM.ankleR)) return { at: 'ankle', text: 'The frame cuts across an ankle. Include the whole foot or crop above the lower leg.' };
+  if (near(LM.kneeL, LM.kneeR))   return { at: 'knee',  text: 'The lower edge crosses a knee. Include more of the leg or crop at mid-thigh.' };
+  if (near(LM.wristL, LM.wristR)) return { at: 'wrist', text: 'The lower edge crosses a wrist. Leave space for the whole hand.' };
   if (below(LM.footL, LM.footR) && above(LM.ankleL, LM.ankleR)) {
-    return { at: 'foot', text: '脚尖被切掉了一点点。要么整只脚给进来，要么干脆收到膝盖以上。' };
+    return { at: 'foot', text: 'A foot is clipped by the edge. Include it fully or choose a tighter crop.' };
   }
   return null;
 }

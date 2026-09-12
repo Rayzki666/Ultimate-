@@ -1,50 +1,45 @@
-// 路由与接线。
-
 import { $, $$, el, toast, buzz } from './ui.js';
 import { store } from './store.js';
 import { Coach, SHOT_TYPES } from './coach.js';
-import { mountRecipes, mountCues, mountDuo } from './content.js';
-import { mountHer, render as renderHer, buildSpecSheet, preferredShotType } from './survey.js';
+import { renderStyles } from './content.js';
+import { getStyle } from './styles.js';
 import { mountReview, addFiles } from './review.js';
 import { verifyKey, hasKey } from './claude.js';
 
 const coach = new Coach();
-const mounted = new Set();
 const capturedPhotos = [];
 let capturing = false;
-
-// ── 路由 ──────────────────────────────────────────────
-const MOUNTERS = {
-  recipes: mountRecipes,
-  cues:    mountCues,
-  duo:     mountDuo,
-  review:  async () => mountReview(),
-  her:     async () => mountHer(onSurveySaved),
-};
-
-async function go(name) {
+const views = ['coach', 'styles', 'review', 'settings'];
+let reviewMounted = false;
+function go(name) {
+  if (!views.includes(name)) name = 'coach';
   $$('.view').forEach(v => { v.hidden = v.dataset.view !== name; });
   $$('.tab').forEach(t => t.setAttribute('aria-current', String(t.dataset.go === name)));
   store.lastTab = name;
-
-  // 离开取景页就把摄像头关掉，别让它在后台亮着
   if (name !== 'coach') coach.stop();
-
-  if (!mounted.has(name) && MOUNTERS[name]) {
-    mounted.add(name);
-    try {
-      await MOUNTERS[name]();
-    } catch (err) {
-      mounted.delete(name);
-      toast('这一页没加载出来：' + err.message, 3500);
-    }
-  }
+  if (name === 'styles') renderStyles(coach.style?.id, chooseStyle);
+  if (name === 'review' && !reviewMounted) { mountReview(); reviewMounted = true; }
   window.scrollTo({ top: 0 });
+  return Promise.resolve();
 }
-
+function syncStyle() {
+  const name = coach.style?.name || 'Free shooting';
+  $('#activeStyleName').textContent = name;
+  $('#idleStyle').textContent = coach.style ? name + ' · Change look ↗' : 'Explore shooting styles →';
+  $('#styleLiveNote').textContent = coach.style?.setup || 'Choose a style to shape your live guidance.';
+  $$('#shotTypes button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.shot === coach.shotType)));
+  $$('#compositionTypes button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.composition === coach.composition)));
+}
+function chooseStyle(id) {
+  coach.setStyle(id);
+  syncStyle();
+  go('coach');
+}
 $$('.tab').forEach(t => t.addEventListener('click', () => { buzz(10); go(t.dataset.go); }));
+$('#idleStyle').addEventListener('click', () => go('styles'));
+$('#activeStyle').addEventListener('click', () => go('styles'));
+$('#clearStyle').addEventListener('click', () => chooseStyle(null));
 
-// ── 取景页 ────────────────────────────────────────────
 function syncCamButtons() {
   $('#btnGrid').setAttribute('aria-pressed', String(coach.showGrid));
   $('#btnTilt').setAttribute('aria-pressed', String(coach.tilt.active));
@@ -95,7 +90,7 @@ $('#btnTrack').addEventListener('click', async (e) => {
   if (coach.tracker.ready) {
     coach.disableTracking();
     btn.setAttribute('aria-pressed', 'false');
-    toast('已关闭人物识别。手动标记仅作构图参考，不判断拍摄时机。');
+    toast('Detection off. Manual markers guide framing only.');
     return;
   }
   btn.disabled = true;
@@ -128,19 +123,21 @@ $$('#compositionTypes button').forEach(b => {
 // 本次会话最多保留 20 张，不悄悄丢弃旧照片。
 $('#captureNow').addEventListener('click', async () => {
   if (capturing) return;
-  if (capturedPhotos.length >= 20) { toast('本次已拍 20 张。请保存照片后刷新页面，开始下一轮。'); return; }
+  if (capturedPhotos.length >= 20) { toast('This session has 20 photos. Save them before refreshing to start again.'); return; }
   capturing = true;
   try {
     const { blob, width, height } = await coach.capture();
     const filename = 'haohaopai-' + Date.now() + '.jpg';
-    capturedPhotos.push(new File([blob], filename, { type: blob.type }));
+    const file = new File([blob], filename, { type: blob.type });
+    file.shootingStyle = coach.style?.name || null;
+    capturedPhotos.push(file);
     $('#captureCount').textContent = String(capturedPhotos.length);
     $('#viewCaptures').disabled = false;
-    $('#captureStatus').textContent = '已拍 ' + capturedPhotos.length + ' 张 · ' + width + ' × ' + height;
+    $('#captureStatus').textContent = 'Captured ' + capturedPhotos.length + ' · ' + width + ' × ' + height;
     buzz(35);
-    toast('已拍下，点「本次拍摄」查看和保存。', 1800);
+    toast('Captured. Open This session to view and save.', 1800);
   } catch (err) {
-    toast(err.message || '拍摄失败，请重试。', 3200);
+    toast(err.message || 'Capture failed. Please try again.', 3200);
   } finally { capturing = false; }
 });
 $('#viewCaptures').addEventListener('click', async () => {
@@ -160,163 +157,42 @@ $('#nativeShot').addEventListener('change', (e) => {
   go('review').then(() => addFiles(files));
 });
 
-// ── 合照倒计时 ────────────────────────────────────────
-let timerSeconds = 10;
-let timerHandle = null;
-let audioCtx = null;
 
-function beep(freq = 880, ms = 90) {
-  try {
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.001, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.28, audioCtx.currentTime + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + ms / 1000);
-    osc.connect(gain).connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + ms / 1000 + 0.02);
-  } catch { /* 静音就静音 */ }
-}
-
-$$('[data-timer]').forEach(b => {
-  b.addEventListener('click', () => {
-    timerSeconds = Number(b.dataset.timer);
-    $('#timerDisplay').textContent = String(timerSeconds);
-  });
-});
-
-$('#timerStart').addEventListener('click', () => {
-  if (timerHandle) { clearInterval(timerHandle); timerHandle = null; }
-  let n = timerSeconds;
-  const display = $('#timerDisplay');
-  display.textContent = String(n);
-  display.classList.add('hot');
-  beep(660, 70);
-
-  timerHandle = setInterval(() => {
-    n -= 1;
-    display.textContent = String(Math.max(n, 0));
-    if (n > 0 && n <= 3) { beep(880, 80); buzz(40); }
-    if (n <= 0) {
-      clearInterval(timerHandle);
-      timerHandle = null;
-      beep(1320, 320);
-      buzz([60, 60, 140]);
-      display.textContent = '拍';
-      setTimeout(() => {
-        display.textContent = String(timerSeconds);
-        display.classList.remove('hot');
-      }, 1800);
-    }
-  }, 1000);
-});
-
-// ── 设置 ──────────────────────────────────────────────
 function refreshKeyStatus() {
-  $('#keyStatus').textContent = hasKey() ? '已保存，AI 点评可用。' : '没填，AI 点评关闭。';
+  $('#keyStatus').textContent = hasKey() ? 'Key saved. Optional AI review is available.' : 'No key saved. On-device guidance works without one.';
 }
-
 $('#saveKey').addEventListener('click', async (e) => {
-  const input = $('#apiKey');
-  const key = input.value.trim();
-  if (!key) { toast('先填一个 Key。'); return; }
-  e.currentTarget.disabled = true;
-  $('#keyStatus').textContent = '正在验证…';
-  const res = await verifyKey(key);
-  e.currentTarget.disabled = false;
-  if (res.ok) {
-    input.value = '';
-    toast('Key 可用，AI 点评已经打开。', 3000);
-  } else {
-    toast(res.message, 4200);
-  }
-  refreshKeyStatus();
+  const btn = e.currentTarget, input = $('#apiKey'), key = input.value.trim();
+  if (!key) { toast('Enter an API key first.'); return; }
+  btn.disabled = true;
+  $('#keyStatus').textContent = 'Checking key…';
+  try {
+    const result = await verifyKey(key);
+    if (result.ok) { input.value = ''; toast('Key saved.'); }
+    else toast(result.message, 4500);
+  } finally { btn.disabled = false; refreshKeyStatus(); }
 });
-
-$('#clearKey').addEventListener('click', () => {
-  store.apiKey = '';
-  $('#apiKey').value = '';
-  refreshKeyStatus();
-  toast('已清除。');
-});
-
+$('#clearKey').addEventListener('click', () => { store.apiKey = ''; $('#apiKey').value = ''; refreshKeyStatus(); toast('Key removed.'); });
 $('#exportData').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(store.exportAll(), null, 2)], { type: 'application/json' });
-  const a = el('a', { href: URL.createObjectURL(blob), download: 'haohaopai-data.json' });
+  const url = URL.createObjectURL(new Blob([JSON.stringify(store.exportAll(), null, 2)], { type: 'application/json' }));
+  const a = el('a', { href: url, download: 'frame-preferences.json' });
   document.body.append(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 });
-
 $('#wipeData').addEventListener('click', () => {
-  if (!confirm('会清掉她的说明书、API Key 和所有设置。确定吗？')) return;
-  store.wipe();
-  renderHer(onSurveySaved);
-  refreshKeyStatus();
-  toast('清空了。');
+  if (!confirm('Reset saved preferences and remove the API key?')) return;
+  store.wipe(); coach.setStyle(null); refreshKeyStatus(); syncStyle(); toast('Preferences reset.');
 });
-
-// ── 说明书接到取景页 ──────────────────────────────────
-function onSurveySaved(answers) {
-  const type = preferredShotType(answers);
-  coach.setShotType(type);
-  $$('#shotTypes button').forEach(b =>
-    b.setAttribute('aria-pressed', String(b.dataset.shot === type)));
-  renderCoachReminder();
-}
-
-function renderCoachReminder() {
-  const host = $('#coachHelp');
-  const old = host.querySelector('[data-her-reminder]');
-  old?.remove();
-
-  const sheet = buildSpecSheet(store.survey);
-  if (!sheet || !sheet.rules.length) return;
-
-  host.prepend(el('details', { 'data-her-reminder': true, open: true }, [
-    el('summary', { text: '她说的（按你们填的问卷）' }),
-    el('ul', { class: 'tight' }, sheet.rules.slice(0, 4).map(t => el('li', { text: t }))),
-  ]));
-}
-
-// ── 启动 ──────────────────────────────────────────────
+if (getStyle(store.prefs.styleId)) coach.setStyle(store.prefs.styleId);
+syncStyle();
 refreshKeyStatus();
-renderCoachReminder();
-
-const saved = store.survey;
-if (saved) {
-  const type = preferredShotType(saved);
-  coach.setShotType(type);
-  $$('#shotTypes button').forEach(b =>
-    b.setAttribute('aria-pressed', String(b.dataset.shot === type)));
-}
-
-// 说明书里的第一条常驻在取景页，所以「她」这一页一开始就要挂上
-if (!mounted.has('her')) {
-  mounted.add('her');
-  mountHer(onSurveySaved).then(renderCoachReminder).catch(() => mounted.delete('her'));
-}
-
-const VIEWS = ['coach', 'recipes', 'cues', 'duo', 'review', 'her'];
-go(VIEWS.includes(store.lastTab) ? store.lastTab : 'coach');
-
-// 每次进入先到相机首页，照片不会自动上传。
+// Migrate old content tabs to the new focused navigation.
+const savedTab = store.lastTab;
+go(savedTab === 'recipes' ? 'styles' : savedTab === 'her' ? 'settings' : savedTab);
 window.addEventListener('pagehide', () => coach.stop());
-
-// 离开页面就释放摄像头
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) coach.stop();
+document.addEventListener('visibilitychange', () => { if (document.hidden) coach.stop(); });
+if ('serviceWorker' in navigator) window.addEventListener('load', () => {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
 });
-
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(() => { /* 离线缓存失败不影响使用 */ });
-  });
-}
-
-// 加 #debug 打开调试入口：在控制台里可以直接摆弄取景教练的状态。
 if (location.hash === '#debug') window.__coach = coach;
-
 export { coach, SHOT_TYPES };

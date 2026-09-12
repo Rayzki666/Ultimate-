@@ -15,7 +15,7 @@ export async function loadImage(file) {
     img.decoding = 'async';
     await new Promise((resolve, reject) => {
       img.onload = resolve;
-      img.onerror = () => reject(new Error('图片读不出来'));
+      img.onerror = () => reject(new Error('The image could not be read.'));
       img.src = url;
     });
     await img.decode?.().catch(() => {});

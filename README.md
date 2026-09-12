@@ -1,60 +1,44 @@
-# 好好拍 · AI 相机
+# Frame — AI Camera
 
-一个在拍摄过程中给出指导的网页相机。打开相机，选择拍摄范围和构图，照着当前的一条建议调整；已测条件满足、人物位置持续稳定后，提示「现在可以拍」。
+An English-first camera that helps you shoot toward an intention.
+Choose **Styles → Use this look → Open camera**, then follow one live direction at a time.
 
-## 这一版能做什么
+## Shooting styles
 
-- **默认开启人物分析**：在设备上运行 MediaPipe PoseLandmarker，分析人物位置、留白与下沿裁切。第一次需要下载约 18MB，之后使用缓存。可以关闭识别，选择会被记住。
-- **一次一个动作**：先处理明显曝光问题和缺少人物，再检查光线、裁切、角度、距离与构图。提示由动作和原因组成，语音可以关闭。
-- **构图是选择**：三分、居中、自由；特写和合照默认用居中目标。自由模式不强制人物靠近三分线。
-- **持续稳定才亮灯**：约 1.1 秒连续符合条件才推荐按快门。人物位置或大小改变、帧中断、丢失人物会重新计时；合照需要两个人。手动位置标记不会触发绿灯。
-- **在当前画面直接拍摄**：保存与取景框一致的 JPEG，包含前置镜像但不包含网格、人物标记或提示。拍摄后仍留在相机页面，可以连续拍摄。
-- **本次拍摄 → 选片 → 保存照片**：一次页面会话保留最多 20 张，照片不自动上传。刷新会丢失会话照片，请先保存。系统相机入口仍保留，具体是拍照还是文件选择取决于设备和浏览器。
-- 保留拍摄配方、话术、合照计时、问卷、选片和主动触发的 AI 照片点评。
+| Preset | Default framing | How live guidance changes |
+| --- | --- | --- |
+| Cinematic Portrait | Portrait, thirds | Stronger subject presence; suggestions respond to brightness differences across the frame. |
+| Golden Glow | Portrait, thirds | Backlight advice preserves the intended rim light while asking for more light on the face; warm-tone readings inform suggestions. |
+| Travel Story | Full body, thirds | Allows a smaller subject and requests more space for the environment; bright upper frames trigger a suggestion to include less sky. |
+| Editorial | Full body, center | Requests more subject presence and a deliberate central composition. |
 
-## 能力边界
+The lookbook uses vector composition studies. Styles are shooting intentions, **not color filters**. You can override framing and composition or return to free shooting. Selection persists in this browser. Each in-app photo records its shooting style for the current session.
 
-当前实时分析是**人物关键点模型 + 像素统计 + 拍摄规则**。它没有实时理解背景物体、服装风格、表情、眨眼或摄影师意图，也没有可靠测量照片真实对焦。绿灯只代表已经测到的条件通过，不代表「全局最佳」或「一定清晰」。
+## Focused interface
 
-角度传感器不可用时显示「待测」，不假装已经检查。姿态识别失败仍可以按快门；手动点画面只提供位置参考，不跟踪人物。默认关注面积最大的一个人，合照看两个人，不做人脸身份识别。
+Camera, Styles, Photos and Settings. Conversation scripts and the previous content library are removed from the active app. Old saved Recipes and profile tabs route to Styles and Settings. Stored data is not silently deleted.
 
-网页快门保存的是浏览器提供的视频帧，不能承诺与原生相机的 HDR、全分辨率照片或多镜头能力等同。人物位置稳定不等于快门足够快，弱光与人物动作仍可能导致模糊。
+Live camera text, errors, voice guidance, photo review and the web app manifest are in English. Optional cloud reviews request English responses.
 
-## 使用
+## What the camera measures
 
-用 HTTPS 部署本仓库，手机浏览器打开后点击「开启 AI 相机」，允许相机访问。iPhone 的角度权限由点击事件请求，拒绝后仍能拍摄。没有构建步骤，也没有应用运行时 npm 依赖。
+On-device MediaPipe body landmarks, pixel brightness and available device orientation. The first model load is about 18 MB. One priority instruction handles exposure, missing people, cropping, angle, style-specific subject scale and composition. After about 1.1 seconds of continuous stability, the frame turns green. New movement, stale frames and lost subjects reset it.
 
-如使用 GitHub Pages，请在仓库的 Pages 设置里选择**包含当前实现的分支**及根目录，不要误选没有这些文件的分支。部署配置并不由本次代码更改自动创建。
+Styles use only measured signals. Background objects, expressions, actual focus and semantic scene understanding are not detected. A warm-toned frame is not proof of sunset. Green means the measured conditions are satisfied, not that the photo is perfect.
 
-本机开发可用静态服务器，例如 `python3 -m http.server 8000 --bind 127.0.0.1`。测试命令供已有开发环境使用，不要求把仓库下载到个人电脑。
+## Photos and privacy
 
-## AI 点评（可选）
+The web shutter saves a JPEG of the visible video crop, including the front-camera mirror and excluding guides. It does not provide native camera HDR or full sensor resolution. Use Native camera when needed.
 
-「她」页面沿用原有 Anthropic API Key 配置。用户主动点击点评后才会发送照片；实时取景不发送给云端。API Key 存在浏览器本地存储中，清除网站数据会移除它。不要把个人直连 Key 的方式用于面向多人、共享设备的产品。
+Up to 20 photos are held in the page session. **Save photos before refreshing.** Live guidance does not upload frames. Optional photo review sends only explicitly selected photos to Anthropic using the user's own key; provider fees may apply. The key is stored in this browser. This personal-key setup is not a multi-user backend.
 
-模型可用性和费用取决于服务提供商与账户配置；本项目不承诺固定单张费用。
+## Deployment and updates
 
-## 验证
+No build step is required. Host the repository root over HTTPS. For GitHub Pages, keep the selected implementation branch as the source. After deployment, save session photos, then refresh Safari to load the latest app. Service-worker shell version: v5.
 
-- `node --test tests/guidance.test.mjs`：指导优先级、构图选择、镜像坐标、稳定门槛、丢人和过期观察。
-- `tests/browser-smoke.cjs`：在安装 Playwright 的环境中，检查模型加载、手机界面、JPEG 拍摄与下载、页面导航和相机关闭。
-- GitHub Actions 的 `Camera checks` 在云端运行以上检查并保留手机尺寸截图。浏览器测试使用模拟相机；指导状态注入确定的观察数据，不能替代真机实拍。
-- iPhone Safari 权限、真实前后摄像头、低光、多人切换与连续拍摄仍需真机验收。
+## Validation
 
-## 主要文件
-
-| 文件 | 职责 |
-|---|---|
-| `js/guidance.js` | 单条建议、构图目标、持续稳定判断 |
-| `js/coach.js` | 相机生命周期、观察采样、提示与叠加层 |
-| `js/capture.js` | 按可见区域生成 JPEG |
-| `js/vision.js` | 本机姿态模型，GPU 失败时尝试 CPU |
-| `js/frame.js` | 曝光统计、可见裁切、前置镜像的测光坐标 |
-| `js/sensors.js` | 角度传感器、权限与过期读数 |
-| `js/app.js` | 页面导航、拍摄会话、交互接线 |
-| `js/review.js` | 选片、保存与可选 AI 点评 |
-| `index.html` / `css/app.css` | 相机首页、取景、指导卡、快门 |
-| `sw.js` | 离线资源，改变代码后更新版本 |
-| `docs/ai-camera-design.md` | 产品方向、下一阶段与真机验收 |
-
-技术参考：[MediaPipe Web PoseLandmarker](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/web_js)、[Canvas JPEG 输出](https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/toBlob)。
+- `node --test tests/guidance.test.mjs`: geometry, readiness, preset behavior, environment-dependent hints, fallback and exposure priority.
+- `tests/browser-smoke.cjs`: real bundled model load, style selection/persistence, English navigation, camera JPEG download and phone-sized layouts.
+- GitHub Actions runs these checks in the cloud. Synthetic video and injected observations are used for repeatable controller tests.
+- Real iPhone permission flows, speed, heat, image quality and download-to-Photos behavior still require device testing.

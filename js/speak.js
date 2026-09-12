@@ -34,8 +34,8 @@ export class Voice {
     if (this._voice) return this._voice;
     try {
       const all = speechSynthesis.getVoices() || [];
-      this._voice = all.find(v => v.lang === 'zh-CN')
-                 || all.find(v => v.lang?.toLowerCase().startsWith('zh'))
+      this._voice = all.find(v => v.lang === 'en-US')
+                 || all.find(v => v.lang?.toLowerCase().startsWith('en'))
                  || null;
     } catch { /* 忽略 */ }
     return this._voice;
@@ -54,7 +54,7 @@ export class Voice {
     try {
       speechSynthesis.cancel();   // 别排队，积压的旧提示已经过时了
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'zh-CN';
+      u.lang = 'en-US';
       const v = this._pickVoice();
       if (v) u.voice = v;
       u.rate = 1.06;

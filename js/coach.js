@@ -14,6 +14,7 @@ import { FrameReader, interpret, coverRect, regionFromBox } from './frame.js';
 import { SubjectTracker, readSubject, drawSkeleton, coverMapper } from './vision.js';
 import { Voice } from './speak.js';
 import { SHOT_TYPES, targetFor, assessScene, ReadinessGate } from './guidance.js';
+import { getStyle, styleHint } from './styles.js';
 import { captureFrame } from './capture.js';
 import { store } from './store.js';
 
@@ -43,6 +44,7 @@ export class Coach {
     this.subjects = [];
     this.ready    = false;
     this.composition = ['thirds', 'center', 'free'].includes(store.prefs.composition) ? store.prefs.composition : 'thirds';
+    this.style = getStyle(store.prefs.styleId);
     this.gate = new ReadinessGate();
     this._targetX = null;
     this._session = 0;
@@ -66,7 +68,7 @@ export class Coach {
     if (this.running) return true;
     if (this._starting) return false;
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-      this._fail('请在支持相机的浏览器中用 HTTPS 打开。iPhone 建议使用 Safari。');
+      this._fail('Open this page over HTTPS in a camera-enabled browser. On iPhone, use Safari.');
       return false;
     }
     const session = ++this._session;
@@ -88,7 +90,7 @@ export class Coach {
       stream.getVideoTracks()[0]?.addEventListener('ended', () => {
         if (session !== this._session) return;
         this.stop();
-        this._fail('相机连接已中断，请重新打开。');
+        this._fail('Camera disconnected. Please open it again.');
       });
       $('#camIdle').hidden = true;
       $('#camError').hidden = true;
@@ -148,7 +150,7 @@ export class Coach {
     $('#cameraStage')?.classList.remove('is-ready');
     $('#captureNow').disabled = true;
     $('#btnTrack').disabled = false;
-    $('#btnTrack').textContent = '识别';
+    $('#btnTrack').textContent = 'Detect';
     this.octx.clearRect(0, 0, this.overlay.width, this.overlay.height);
   }
 
@@ -159,7 +161,7 @@ export class Coach {
     if (wasRunning) {
       const ok = await this.start();
       if (ok && this.facing === 'user') {
-        toast('前置画质比后置差不少，合照能用后置就用后置。', 3200);
+        toast('Front camera selected. The saved image matches this mirrored preview.', 3200);
       }
     }
   }
@@ -170,8 +172,8 @@ export class Coach {
     const prefs = store.prefs; prefs.tilt = ok; store.prefs = prefs;
     if (!ok) {
       toast(this.tilt.permission === 'denied'
-        ? '你拒绝了动作权限，水平仪用不了。在「设置 → Safari → 动作与方向的访问」里可以打开。'
-        : '这台设备读不到陀螺仪，水平仪用不了。', 4200);
+        ? 'Motion access was denied. Check this website permission in Safari and retry.'
+        : 'Orientation readings are unavailable on this device.', 4200);
     }
     return ok;
   }
@@ -183,17 +185,17 @@ export class Coach {
     const session = this._session;
     const btn = $('#btnTrack');
     btn.disabled = true;
-    btn.textContent = '加载中';
+    btn.textContent = 'Loading';
     const ok = await this.tracker.load();
     if (session !== this._session || !this.running) return false;
     btn.disabled = false;
-    btn.textContent = ok ? '识别' : '重试识别';
+    btn.textContent = ok ? 'Detect' : 'Retry';
     btn.setAttribute('aria-pressed', String(ok));
     if (ok) {
       this.head = null;
       const prefs = store.prefs; prefs.track = true; store.prefs = prefs;
     } else {
-      toast('人物识别暂不可用，可重试或直接拍摄。', 3500);
+      toast('Subject detection is unavailable. Retry or take a photo anytime.', 3500);
     }
     this._updateHud();
     return ok;
@@ -212,13 +214,32 @@ export class Coach {
     const enabled = this.voice.toggle(on);
     const prefs = store.prefs; prefs.voice = enabled; store.prefs = prefs;
     if (enabled && !this.voice.supported) {
-      toast('这个浏览器不支持语音播报。');
+      toast('Voice guidance is unavailable in this browser.');
       return false;
     }
     return enabled;
   }
 
   toggleVoice() { return this._setVoice(!this.voice.enabled); }
+
+  setStyle(id) {
+    this.style = getStyle(id);
+    this.voice.stop();
+    this.ready = false;
+    this._tip = { key: null, since: 0, shown: null };
+    this._targetX = null;
+    this.gate.reset();
+    if (this.style) {
+      this.shotType = this.style.shotType;
+      this.composition = this.style.composition;
+    }
+    const prefs = store.prefs;
+    prefs.styleId = this.style?.id || null;
+    prefs.composition = this.composition;
+    store.prefs = prefs;
+    $('#cameraStage').classList.remove('is-ready');
+    if (this.running) this._updateHud();
+  }
 
   setShotType(type) {
     if (SHOT_TYPES[type]) {
@@ -240,7 +261,7 @@ export class Coach {
 
   async capture() {
     if (!this.running || performance.now() - this._frameSeenAt > 750) {
-      throw new Error('相机画面还没准备好，请稍等。');
+      throw new Error('The camera is not ready yet. Please wait.');
     }
     const { w, h } = this._box;
     const shot = await captureFrame(this.video, w, h, this.facing === 'user');
@@ -334,20 +355,20 @@ export class Coach {
 
     if (t && t.rollValid) {
       const a = Math.abs(t.roll);
-      setChip('#chipLevel', `${t.roll > 0 ? '右低 ' : t.roll < 0 ? '左低 ' : ''}${a.toFixed(1)}°`,
+      setChip('#chipLevel', `${t.roll > 0 ? 'R ' : t.roll < 0 ? 'L ' : ''}${a.toFixed(1)}°`,
               a <= ROLL_TOLERANCE ? 'good' : a <= 5 ? 'warn' : 'bad');
     } else {
-      setChip('#chipLevel', t ? '—' : '未开', null);
+      setChip('#chipLevel', t ? '—' : 'Off', null);
     }
 
     if (t) {
       const p = Math.round(t.pitch);
       const spec = SHOT_TYPES[this.shotType];
       const inRange = p >= spec.lo && p <= spec.hi;
-      setChip('#chipPitch', `${p > 1 ? '俯' : p < -1 ? '仰' : '平'}${Math.abs(p)}°`,
+      setChip('#chipPitch', `${p > 1 ? 'Down ' : p < -1 ? 'Up ' : 'Level '}${Math.abs(p)}°`,
               inRange ? 'good' : Math.abs(p - (p > spec.hi ? spec.hi : spec.lo)) < 7 ? 'warn' : 'bad');
     } else {
-      setChip('#chipPitch', '未开', null);
+      setChip('#chipPitch', 'Off', null);
     }
 
     if (r) {
@@ -355,14 +376,14 @@ export class Coach {
               r.exposure.level === 'bad' ? 'bad'
               : r.exposure.level === 'warn' || r.light.level === 'warn' ? 'warn' : 'good');
     } else {
-      setChip('#chipLight', '待测', null);
+      setChip('#chipLight', 'Not measured', null);
     }
 
     const chipS = $('#chipSubject');
     if (this.tracker.ready) {
       const n = this.subjects.length;
       chipS.hidden = false;
-      setChip('#chipSubject', n === 0 ? '没看到人' : n === 1 ? '认到 1 人' : `认到 ${n} 人`,
+      setChip('#chipSubject', n === 0 ? 'No subject' : n === 1 ? '1 person' : `${n} people`,
               n === 0 ? 'warn' : 'good');
     } else {
       chipS.hidden = true;
@@ -379,7 +400,7 @@ export class Coach {
       this._targetX = targetFor(this.composition, this.shotType, subjects[0].head.x);
     }
     const assessment = assessScene({
-      reading: r, tilt: t, subjects, shotType: this.shotType,
+      reading: r, tilt: t, subjects, shotType: this.shotType, style: this.style,
       targetX: this._targetX, tracking: this.tracker.state,
       manual: !subjects.length && Boolean(this.head), mirror: this.facing === 'user',
     });
@@ -388,10 +409,13 @@ export class Coach {
       subjects: subjects.slice(0, this.shotType === 'duo' ? 2 : 1) });
     this.ready = state.ready;
     let tip = assessment.tip || (state.ready
-      ? { key: 'ready', sev: 'ready', icon: '✓', text: '现在可以拍',
-          reason: t ? '已测光线、构图与位置稳定。按下快门留住这一刻。' : '光线、构图与位置稳定；机身角度未测。', voice: '现在可以拍' }
-      : { key: 'steady', sev: 'good', icon: '◎', text: '保持这个画面',
-          reason: '让人物和手机都稳住片刻，再亮绿灯。', voice: '' });
+      ? { key: 'ready', sev: 'ready', icon: '✓', text: 'Ready to shoot',
+          reason: t ? 'Measured light and framing are steady. Capture this moment.' : 'Light and framing are steady. Camera angle is not measured.', voice: 'Ready to shoot' }
+      : { key: 'steady', sev: 'good', icon: '◎', text: 'Hold this frame',
+          reason: 'Keep the subject and camera steady for a moment.', voice: '' });
+    const styleNote = styleHint(this.style, this.stats, r);
+    $('#styleLiveNote').textContent = styleNote;
+    if (!assessment.tip && this.style) tip.reason = styleNote;
     this._showTip(tip, wasReady, state.progress, assessment.checks);
   }
 
@@ -412,12 +436,12 @@ export class Coach {
     $('#coachTipReason').textContent = tip.reason;
     $('#cameraStage').classList.toggle('is-ready', this.ready);
     $('#readyProgress').value = progress;
-    $('#readyProgress').setAttribute('aria-valuetext', this.ready ? '已稳定，可以拍摄' : '等待持续稳定');
-    $('#coachState').textContent = this.ready ? '可以拍摄' : tip.key === 'steady' ? '等待稳定' : '实时指导';
-    for (const [key, label] of [['light', '光线'], ['framing', '构图'], ['angle', '角度']]) {
+    $('#readyProgress').setAttribute('aria-valuetext', this.ready ? 'Steady and ready to shoot' : 'Waiting for sustained stability');
+    $('#coachState').textContent = this.ready ? 'Ready to shoot' : tip.key === 'steady' ? 'Hold steady' : 'Live guidance';
+    for (const [key, label] of [['light', 'Light'], ['framing', 'Frame'], ['angle', 'Angle']]) {
       const item = $('#check-' + key);
       item.dataset.state = checks[key];
-      item.textContent = label + (checks[key] === 'good' ? ' ✓' : checks[key] === 'warn' ? ' · 调整' : ' · 待测');
+      item.textContent = label + (checks[key] === 'good' ? ' ✓' : checks[key] === 'warn' ? ' · Adjust' : ' · —');
     }
     if ((wasReady && !this.ready) || (old && old.key !== tip.key)) this.voice.stop();
     if (this.ready && !wasReady) {
@@ -553,14 +577,14 @@ export class Coach {
     switch (err?.name) {
       case 'NotAllowedError':
       case 'SecurityError':
-        return '摄像头权限被拒了。在 Safari 地址栏左边的「ᴀA」→「网站设置」里把相机改成允许，然后重试。';
+        return 'Camera access was denied. Allow Camera in Safari website settings, then try again.';
       case 'NotFoundError':
       case 'OverconstrainedError':
-        return '找不到可用的摄像头。';
+        return 'No camera is available.';
       case 'NotReadableError':
-        return '摄像头被别的 App 占着。把相机类的 App 关掉再试。';
+        return 'The camera is busy. Close other camera apps and try again.';
       default:
-        return '打不开摄像头：' + (err?.message || err?.name || '未知错误');
+        return 'Unable to open the camera: ' + (err?.message || err?.name || 'Unknown error');
     }
   }
 

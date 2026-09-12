@@ -1,128 +1,34 @@
-// 渲染三个纯内容页：配方、话术、合照。
+import { $, el, buzz } from './ui.js';
+import { STYLES } from './styles.js';
 
-import { $, el, loadJSON, buzz } from './ui.js';
-
-/** 配方和合照共用同一种卡片结构。 */
-function specCard(item) {
-  const body = el('div', { class: 'card-body' });
-  const spec = el('div', { class: 'spec' });
-
-  const block = (title, lines, cls) => {
-    if (!lines || !lines.length) return null;
-    return el('div', { class: 'spec-block' }, [
-      el('h3', { text: title }),
-      el('ul', { class: cls || '' }, lines.map(l => el('li', { text: l }))),
+// Local vector studies show composition without pretending to be edited photos.
+function study(style, index) {
+  const [bg, light, ink] = style.palette;
+  const travel = style.id === 'travel', center = style.id === 'editorial';
+  const x = center ? 160 : 112, y = travel ? 105 : 62, size = travel ? 16 : 30;
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200">' +
+    '<rect width="320" height="200" fill="' + bg + '"/>' +
+    '<circle cx="260" cy="34" r="105" fill="' + light + '" opacity=".6"/>' +
+    (travel ? '<path d="M0 150L85 70 145 140 232 65 320 130V200H0" fill="' + ink + '" opacity=".7"/>' :
+      '<path d="M32 0V200M288 0V200" stroke="' + light + '" stroke-width="28" opacity=".3"/>') +
+    '<ellipse cx="' + x + '" cy="' + y + '" rx="' + size*.55 + '" ry="' + size*.68 + '" fill="' + ink + '"/>' +
+    '<path d="M' + (x-size) + ' 200L' + (x-size*.8) + ' ' + (y+size) + 'Q' + x + ' ' + (y+size*.3) + ' ' + (x+size*.8) + ' ' + (y+size) + 'L' + (x+size) + ' 200Z" fill="' + ink + '"/>' +
+    '<path d="M107 0V200M213 0V200M0 67H320M0 133H320" stroke="white" stroke-width=".5" opacity=".2"/>' +
+    '<text x="18" y="25" font-family="sans-serif" font-size="10" letter-spacing="2" fill="white" opacity=".8">FRAME / 0' + (index+1) + '</text></svg>';
+  return el('img', { src: 'data:image/svg+xml,' + encodeURIComponent(svg), alt: style.name + ' composition study', width: 320, height: 200 });
+}
+export function renderStyles(selectedId, onSelect) {
+  $('#styleList').replaceChildren(...STYLES.map((style, i) => {
+    const selected = style.id === selectedId;
+    const button = el('button', { class: 'style-select', type: 'button', 'data-style': style.id, 'aria-pressed': String(selected) },
+      [el('span', { text: selected ? 'Use again' : 'Use this look' }), el('span', { text: '↗', 'aria-hidden': 'true' })]);
+    button.addEventListener('click', () => { buzz(15); onSelect(style.id); });
+    return el('article', { class: 'style-card' + (selected ? ' selected' : '') }, [
+      el('div', { class: 'style-art' }, [study(style, i), selected ? el('span', { class: 'style-selected', text: 'SELECTED' }) : null]),
+      el('div', { class: 'style-copy' }, [
+        el('p', { class: 'eyebrow', text: style.mood }), el('h2', { text: style.name }),
+        el('p', { text: style.description }), el('p', { class: 'style-setup', text: style.setup }), button,
+      ]),
     ]);
-  };
-
-  const sayBlock = item.say?.length
-    ? el('div', { class: 'spec-block' }, [
-        el('h3', { text: '你说什么' }),
-        el('ul', {}, item.say.map(l => el('li', {}, [el('span', { class: 'say', text: l })]))),
-      ])
-    : null;
-
-  [
-    block('相机怎么设', item.camera),
-    block('她做什么', item.her),
-    sayBlock,
-    block('别踩这些坑', item.gotcha, 'gotcha'),
-  ].forEach(b => b && spec.append(b));
-
-  body.append(spec);
-
-  const card = el('div', { class: 'card' }, [
-    el('div', { class: 'card-head' }, [
-      el('span', { class: 'card-title', text: item.title }),
-      item.tag ? el('span', { class: 'card-tag', text: item.tag }) : null,
-    ]),
-    item.goal ? el('p', { class: 'card-goal', text: item.goal }) : null,
-    body,
-  ]);
-
-  card.querySelector('.card-head').addEventListener('click', () => {
-    card.classList.toggle('open');
-    buzz(12);
-  });
-  return card;
-}
-
-// ── 配方 ──────────────────────────────────────────────
-export async function mountRecipes() {
-  const data = await loadJSON('./data/recipes.json');
-  const listEl = $('#recipeList');
-  const filterEl = $('#recipeFilter');
-  let active = 'all';
-
-  const render = () => {
-    listEl.replaceChildren();
-    const items = active === 'all'
-      ? data.items
-      : data.items.filter(i => i.filter?.includes(active));
-    if (!items.length) {
-      listEl.append(el('p', { class: 'fine', text: '这一类下面还没有卡片。' }));
-      return;
-    }
-    items.forEach(i => listEl.append(specCard(i)));
-  };
-
-  data.filters.forEach(f => {
-    const b = el('button', { type: 'button', text: f.label });
-    b.setAttribute('aria-pressed', String(f.id === active));
-    b.addEventListener('click', () => {
-      active = f.id;
-      filterEl.querySelectorAll('button').forEach(x =>
-        x.setAttribute('aria-pressed', String(x === b)));
-      render();
-    });
-    filterEl.append(b);
-  });
-
-  render();
-}
-
-// ── 话术 ──────────────────────────────────────────────
-export async function mountCues() {
-  const data = await loadJSON('./data/cues.json');
-  const listEl = $('#cueList');
-  const all = data.groups.flatMap(g => g.lines);
-
-  data.groups.forEach(g => {
-    const card = el('div', { class: 'card open' }, [
-      el('div', { class: 'card-head' }, [el('span', { class: 'card-title', text: g.title })]),
-      g.note ? el('p', { class: 'card-goal', text: g.note }) : null,
-      el('div', { class: 'card-body' },
-        g.lines.map(l => el('div', { class: 'cue-line' }, [
-          el('span', { class: 'say', text: l.t }),
-          l.w ? el('em', { text: l.w }) : null,
-        ]))),
-    ]);
-    card.querySelector('.card-head').addEventListener('click', () => card.classList.toggle('open'));
-    listEl.append(card);
-  });
-
-  let last = -1;
-  $('#cueRandom').addEventListener('click', () => {
-    let i = last;
-    while (all.length > 1 && i === last) i = Math.floor(Math.random() * all.length);
-    last = i;
-    const line = all[i];
-    const box = $('#cueDrawn');
-    box.hidden = false;
-    box.replaceChildren(
-      el('span', { class: 'say', text: line.t }),
-      line.w ? el('small', { text: line.w }) : null,
-    );
-    buzz(20);
-  });
-}
-
-// ── 合照 ──────────────────────────────────────────────
-export async function mountDuo() {
-  const data = await loadJSON('./data/duo.json');
-  const listEl = $('#duoList');
-  if (data.intro) {
-    listEl.append(el('p', { class: 'fine', text: data.intro }));
-  }
-  data.items.forEach(i => listEl.append(specCard(i)));
+  }));
 }

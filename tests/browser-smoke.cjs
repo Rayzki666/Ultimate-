@@ -27,17 +27,33 @@ const server = http.createServer((req, res) => {
   let page;
   try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, permissions: ['camera'] });
-    await context.addInitScript(() => localStorage.setItem('haohaopai:prefs', JSON.stringify({ track: false, tilt: false, voice: false, grid: true })));
+    await context.addInitScript(() => { if (!localStorage.getItem('haohaopai:prefs')) localStorage.setItem('haohaopai:prefs', JSON.stringify({ track: false, tilt: false, voice: false, grid: true })); });
     page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => { errors.push(error.message); console.error('PAGE ERROR:', error.message); });
     await page.goto(url + '/#debug');
     await page.waitForFunction(() => window.__coach);
     await page.screenshot({ path: 'test-results/camera-welcome.png', fullPage: true });
+    // Replace the old content library with selectable, persistent shooting styles.
+    await page.click('[data-go="styles"]');
+    assert.equal(await page.locator('[data-style]').count(), 4);
+    assert.equal(await page.locator('[data-go="cues"]').count(), 0);
+    await page.screenshot({ path: 'test-results/styles-lookbook.png', fullPage: true });
+    await page.click('[data-style="editorial"]');
+    assert.equal(await page.evaluate(() => window.__coach.composition), 'center');
+    assert.equal(await page.evaluate(() => window.__coach.shotType), 'full');
+    assert.equal(await page.locator('#activeStyleName').innerText(), 'Editorial');
+    await page.reload();
+    await page.waitForFunction(() => window.__coach);
+    assert.equal(await page.evaluate(() => window.__coach.style.id), 'editorial');
+    await page.click('#idleStyle');
+    await page.click('#clearStyle');
     await page.click('#startCam');
     await page.waitForFunction(() => window.__coach.running && !document.querySelector('#captureNow').disabled);
     assert.equal(await page.locator('#cameraStage').evaluate(el => el.classList.contains('is-ready')), false);
 
+    await page.click('[data-shot="half"]');
+    await page.click('[data-composition="thirds"]');
     // The actual bundled runtime must load; fake video is only used as camera input.
     await page.click('#btnTrack');
     await page.waitForFunction(() => window.__coach.tracker.state !== 'loading', null, { timeout: 90000 });
@@ -59,7 +75,7 @@ const server = http.createServer((req, res) => {
       c.reader.readRegion = () => 130;
     });
     await page.waitForFunction(() => window.__coach.ready);
-    assert.equal(await page.locator('#coachTipText').innerText(), '现在可以拍');
+    assert.equal(await page.locator('#coachTipText').innerText(), 'Ready to shoot');
     await page.waitForFunction(() => document.querySelector('#toast').hidden);
     await page.screenshot({ path: 'test-results/camera-ready.png', fullPage: true });
 
@@ -75,16 +91,17 @@ const server = http.createServer((req, res) => {
     await page.waitForSelector('#reviewGrid .shot img');
     assert.equal(await page.locator('#reviewGrid .shot').count(), 1);
     assert.equal(await page.evaluate(() => window.__coach.running), false);
+    await page.waitForFunction(() => document.querySelector('#toast').hidden);
     await page.screenshot({ path: 'test-results/camera-review.png', fullPage: true });
     // Even the final photo must remain reachable with the checklist collapsed.
     await page.locator('#localChecklist').evaluate(el => { el.hidden = true; });
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-    const saveBounds = await page.getByRole('button', { name: '保存照片', exact: true }).boundingBox();
+    const saveBounds = await page.getByRole('button', { name: 'Save photo', exact: true }).boundingBox();
     const navBounds = await page.locator('#tabbar').boundingBox();
     assert.ok(saveBounds.y + saveBounds.height <= navBounds.y, 'last photo save button clears fixed navigation');
     const [saved] = await Promise.all([
       page.waitForEvent('download', { timeout: 45000 }),
-      page.getByRole('button', { name: '保存照片', exact: true }).click({ timeout: 15000 }),
+      page.getByRole('button', { name: 'Save photo', exact: true }).click({ timeout: 15000 }),
     ]);
     const filepath = await saved.path();
     const bytes = fs.readFileSync(filepath);
@@ -93,13 +110,19 @@ const server = http.createServer((req, res) => {
     assert.ok(bytes.length > 1000, 'captured JPEG contains image data');
 
     // All existing navigation remains usable.
-    for (const view of ['recipes', 'cues', 'duo', 'her', 'coach']) {
+    for (const view of ['styles', 'settings', 'coach']) {
       await page.click('[data-go="' + view + '"]');
       assert.equal(await page.locator('#view-' + view).isVisible(), true);
+      assert.equal(/[㐀-鿿]/.test(await page.locator('body').innerText()), false, 'visible UI is English');
     }
     await page.setViewportSize({ width: 360, height: 740 });
+    await page.click('#idleStyle');
+    await page.click('[data-style="travel"]');
     await page.click('#startCam');
     await page.waitForFunction(() => window.__coach.running);
+    await page.waitForFunction(() => window.__coach._tip.shown?.key === 'style-space');
+    assert.equal(await page.locator('#activeStyleName').innerText(), 'Travel Story');
+    await page.waitForFunction(() => document.querySelector('#toast').hidden);
     await page.screenshot({ path: 'test-results/camera-small.png', fullPage: true });
     const smallShutter = await page.locator('#captureNow').boundingBox();
     assert.ok(smallShutter.y + smallShutter.height <= 740 - 58, 'small phone shutter remains reachable');

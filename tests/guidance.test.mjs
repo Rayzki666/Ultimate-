@@ -4,10 +4,10 @@ import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../js/guidance.js', import.meta.url), 'utf8');
 const { assessScene, ReadinessGate, targetFor } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
 const frameSource = await readFile(new URL('../js/frame.js', import.meta.url), 'utf8');
-const { coverRect, regionFromBox } = await import('data:text/javascript;base64,' + Buffer.from(frameSource).toString('base64'));
+const { coverRect, regionFromBox, interpret } = await import('data:text/javascript;base64,' + Buffer.from(frameSource).toString('base64'));
 const subject = { head: { x: 1 / 3, y: .22 }, headTop: .16,
   box: { x0: .2, y0: .16, x1: .45, y1: .9 }, visible: { feet: true }, crop: null };
-const reading = { exposure: { level: 'good', label: '正常' }, light: { level: 'good', label: '平光' }, notes: [] };
+const reading = { exposure: { level: 'good', label: 'Balanced' }, light: { level: 'good', label: 'Flat' }, notes: [] };
 const base = { reading, tilt: { roll: 0, pitch: 5, rollValid: true }, subjects: [subject],
   targetX: 1 / 3, shotType: 'half', tracking: 'ready' };
 const at = x => ({ ...subject, head: { x, y: .22 } });
@@ -28,7 +28,7 @@ test('model loading and failure explain degraded mode', () => {
 test('duo requires both people and checks either person for a cut joint', () => {
   assert.equal(assessScene({ ...base, shotType: 'duo' }).tip.key, 'duo-missing');
   assert.equal(assessScene({ ...base, shotType: 'duo', targetX: .5, subjects: [at(.33), at(.67)] }).eligible, true);
-  assert.match(assessScene({ ...base, shotType: 'duo', subjects: [subject, { ...at(.67), crop: { at: 'knee', text: '膝盖在下沿' } }] }).tip.key, /^crop/);
+  assert.match(assessScene({ ...base, shotType: 'duo', subjects: [subject, { ...at(.67), crop: { at: 'knee', text: 'Knee at lower edge' } }] }).tip.key, /^crop/);
 });
 test('composition is a choice; center and free never require thirds', () => {
   assert.equal(targetFor('center', 'half'), .5);
@@ -39,16 +39,16 @@ test('composition is a choice; center and free never require thirds', () => {
 });
 test('horizontal correction reverses for the mirrored front camera', () => {
   const scene = { ...base, subjects: [at(.6)] };
-  assert.equal(assessScene(scene).tip.key, 'compose-右');
-  assert.equal(assessScene({ ...scene, mirror: true }).tip.key, 'compose-左');
+  assert.equal(assessScene(scene).tip.key, 'compose-right');
+  assert.equal(assessScene({ ...scene, mirror: true }).tip.key, 'compose-left');
 });
 test('bad exposure overrides composition and angle corrections', () => {
   const scene = { ...base, subjects: [at(.7)], tilt: { roll: 12, pitch: 5, rollValid: true },
-    reading: { ...reading, exposure: { level: 'bad', label: '太暗' } } };
+    reading: { ...reading, exposure: { level: 'bad', label: 'Too dark' } } };
   assert.equal(assessScene(scene).tip.key, 'exposure');
 });
 test('unknown angles remain unknown and aesthetic notes do not block capture', () => {
-  const result = assessScene({ ...base, tilt: null, reading: { ...reading, notes: ['环境光偏暖'] } });
+  const result = assessScene({ ...base, tilt: null, reading: { ...reading, notes: ['Warm tones'] } });
   assert.equal(result.checks.angle, 'unknown');
   assert.equal(result.eligible, true);
 });
@@ -99,4 +99,41 @@ test('portrait capture uses the exact visible crop without upscaling', () => {
   assert.equal(crop.sw, 810);
   assert.equal(crop.sh, 1080);
   assert.equal(crop.sx, 555);
+});
+
+const stylesSource = await readFile(new URL('../js/styles.js', import.meta.url), 'utf8');
+const { getStyle, styleHint, STYLES } = await import('data:text/javascript;base64,' + Buffer.from(stylesSource).toString('base64'));
+test('travel and editorial give different advice for the same subject size', () => {
+  const scene = { ...base, shotType: 'full', subjects: [{ ...subject, box: { ...subject.box, y1: .66 } }] };
+  assert.equal(assessScene({ ...scene, style: getStyle('travel') }).eligible, true);
+  assert.equal(assessScene({ ...scene, style: getStyle('editorial') }).tip.key, 'distance');
+  assert.equal(assessScene({ ...base, shotType: 'full', style: getStyle('travel') }).tip.key, 'style-space');
+});
+test('golden backlight guidance preserves the intention while protecting the face', () => {
+  const scene = { ...base, reading: { ...reading, light: { level: 'warn', label: 'Backlit' } } };
+  assert.equal(assessScene({ ...scene, style: getStyle('golden') }).tip.key, 'golden-backlight');
+  assert.match(assessScene({ ...scene, style: getStyle('cinematic') }).tip.key, /^light-/);
+  assert.equal(assessScene({ ...scene, style: getStyle('golden') }).eligible, false);
+});
+test('style advice responds to measured environment without blocking for warmth', () => {
+  const stats = { warmth: 0, sideBias: 0, top: 120, bottom: 120 };
+  const warm = styleHint(getStyle('golden'), { ...stats, warmth: 30 }, reading);
+  const cool = styleHint(getStyle('golden'), stats, reading);
+  assert.notEqual(warm, cool);
+  assert.match(cool, /not detected/);
+  assert.notEqual(styleHint(getStyle('travel'), stats, reading), styleHint(getStyle('travel'), { ...stats, top: 230 }, reading));
+  assert.equal(assessScene({ ...base, style: getStyle('golden') }).eligible, true);
+});
+test('presets never override missing subjects, clipped exposure or cut joints', () => {
+  for (const style of STYLES) {
+    assert.equal(assessScene({ ...base, style, subjects: [] }).eligible, false);
+    assert.equal(assessScene({ ...base, style, reading: { ...reading, exposure: { level: 'bad', label: 'Too dark' } } }).tip.key, 'exposure');
+    assert.match(assessScene({ ...base, style, subjects: [{ ...subject, crop: { at: 'wrist', text: 'Clipped wrist' } }] }).tip.key, /^crop-/);
+  }
+});
+test('unknown saved style safely falls back and exposure labels match guidance', () => {
+  assert.equal(getStyle('old-or-invalid'), null);
+  const r = interpret({ mean: 30, clipHigh: 0, sideBias: 0, top: 30, bottom: 30, warmth: 0, clipLow: 0, outer: 30, backlit: 0 });
+  assert.equal(r.exposure.label, 'Too dark');
+  assert.equal(assessScene({ ...base, reading: r }).tip.text, 'Move into more light');
 });

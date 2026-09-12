@@ -13,49 +13,39 @@ import { store } from './store.js';
 const ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-opus-5';
 
-const SYSTEM = `你是一个替朋友看照片的摄影师。他在给他太太拍照，他太太说这些年他一直拍不出她喜欢的照片。
-
-你评价的是摄影，不是人。绝对不要评价照片里的人的长相、身材、年龄或穿着，也不要试图辨认照片里是谁。
-
-你看的是这些东西：
-- 光：方向、软硬、脸上有没有难看的阴影、有没有过曝或死黑
-- 角度：镜头高度、俯仰，会不会显脸大、显腿短、显下巴
-- 构图：人放在画面哪里、头顶留白、有没有切在关节上、地平线歪不歪
-- 背景：干净还是乱，有没有该挪开的东西
-- 清晰度：糊没糊，是手抖还是对焦跑了
-- 情绪：表情自然还是僵，是抓拍还是摆拍，这张有没有故事
-
-建议必须具体到能立刻照做。「构图可以更好」是废话；「往左挪半步把垃圾桶挪出画面」才是建议。
-说人话，不要用摄影黑话。语气像一个懂行的朋友，不是老师。
-如果这张照片其实已经很好，就直说很好，不要为了凑数硬找毛病。`;
+const SYSTEM = `You are a thoughtful photography coach. Respond in English.
+Evaluate light, framing, visible sharpness and the intended shooting style.
+Give specific, practical actions grounded in the supplied photos. Do not invent unseen details.
+Do not identify people or rate their bodies, attractiveness, age or clothing.
+A style is an intention, not a rigid rule. Recognize successful photographs without inventing flaws.
+Do not provide conversation scripts or things to say to the subject.`;
 
 const VERDICT_SCHEMA = {
   type: 'object',
   properties: {
-    score:   { type: 'integer', description: '0 到 100。这张作为「她会喜欢的照片」的综合分。' },
-    keep:    { type: 'boolean', description: '这张值不值得留下来。' },
-    oneLine: { type: 'string',  description: '一句话结论，不超过 30 个字。' },
-    good:    { type: 'array', items: { type: 'string' }, description: '拍对了的地方，一到三条。' },
-    fix:     { type: 'array', items: { type: 'string' }, description: '下次同样场景该怎么改，一到三条，每条都要是能立刻照做的动作。' },
-    sayNext: { type: 'string', description: '下次拍这种场景，他可以对她说的一句话。' },
+    score:   { type: 'integer', description: 'A photography score from 0 to 100, based on the intended look.' },
+    keep:    { type: 'boolean', description: 'Whether the photo is worth keeping.' },
+    oneLine: { type: 'string',  description: 'A short conclusion in English.' },
+    good:    { type: 'array', items: { type: 'string' }, description: 'One to three specific strengths in English.' },
+    fix:     { type: 'array', items: { type: 'string' }, description: 'One to three practical adjustments in English.' },
   },
-  required: ['score', 'keep', 'oneLine', 'good', 'fix', 'sayNext'],
+  required: ['score', 'keep', 'oneLine', 'good', 'fix'],
   additionalProperties: false,
 };
 
 const PICK_SCHEMA = {
   type: 'object',
   properties: {
-    bestIndex: { type: 'integer', description: '最值得留的那张的编号，从 1 开始。' },
-    why:       { type: 'string',  description: '为什么是这张。' },
+    bestIndex: { type: 'integer', description: 'The suggested favorite, numbered from 1.' },
+    why:       { type: 'string',  description: 'Explain the choice in English.' },
     ranking:   {
       type: 'array',
-      description: '按好到差排序的编号，每张都要出现一次。',
+      description: 'Rank every supplied photo once, best first.',
       items: {
         type: 'object',
         properties: {
           index:   { type: 'integer' },
-          verdict: { type: 'string', description: '这一张的一句话评价。' },
+          verdict: { type: 'string', description: 'One sentence about this photo in English.' },
         },
         required: ['index', 'verdict'],
         additionalProperties: false,
@@ -76,7 +66,7 @@ class ClaudeError extends Error {
 
 async function call(body) {
   const key = store.apiKey;
-  if (!key) throw new ClaudeError('还没填 API Key。', 0);
+  if (!key) throw new ClaudeError('Add an API key in Settings first.', 0);
 
   let res;
   try {
@@ -91,7 +81,7 @@ async function call(body) {
       body: JSON.stringify(body),
     });
   } catch {
-    throw new ClaudeError('连不上网络。检查一下网，再试一次。', 0);
+    throw new ClaudeError('Unable to connect. Check your connection and try again.', 0);
   }
 
   if (!res.ok) {
@@ -102,46 +92,35 @@ async function call(body) {
 
   const data = await res.json();
   if (data.stop_reason === 'refusal') {
-    throw new ClaudeError('模型没有处理这张照片。换一张试试。', 0);
+    throw new ClaudeError('The model did not review this photo. Try another.', 0);
   }
 
   const text = (data.content || []).find(b => b.type === 'text')?.text;
-  if (!text) throw new ClaudeError('返回内容是空的。', 0);
+  if (!text) throw new ClaudeError('The service returned an empty response.', 0);
   try {
     return JSON.parse(text);
   } catch {
-    throw new ClaudeError('返回的内容读不出来。', 0);
+    throw new ClaudeError('The service response could not be read.', 0);
   }
 }
 
 function explainStatus(status, detail) {
   switch (status) {
-    case 401: return 'API Key 不对，或者已经失效了。到「她」这一页重新填一次。';
-    case 403: return '这个 Key 没有调用权限。';
-    case 429: return '请求太频繁，或者额度用完了。等一下再试。';
-    case 400: return '请求被拒绝了' + (detail ? '：' + detail : '。');
+    case 401: return 'The API key is invalid or expired. Update it in Settings.';
+    case 403: return 'This API key does not have access.';
+    case 429: return 'Rate or usage limit reached. Try again later.';
+    case 400: return 'Request rejected' + (detail ? ': ' + detail : '.');
     case 529:
-    case 503: return '服务暂时忙不过来，过一会儿再试。';
-    default:  return `出错了（${status}）` + (detail ? '：' + detail : '。');
+    case 503: return 'The service is busy. Try again later.';
+    default:  return `Service error (${status})` + (detail ? ': ' + detail : '.');
   }
 }
 
-function contextBlock({ specSheet, scene, local }) {
+function contextBlock({ scene, local }) {
   const lines = [];
-  if (specSheet) {
-    lines.push('她本人填过一份问卷，这是她要的东西：\n- ' + specSheet);
-    lines.push('评价这张照片时，把她的这些偏好放在最前面——通用的摄影标准要给她的偏好让路。');
-  }
-  if (scene) lines.push('拍摄场景：' + scene);
-  if (local) {
-    lines.push(
-      '这张照片在本机测出来的客观数据（供参考，你看到的画面才是准的）：\n' +
-      `- 平均亮度 ${Math.round(local.mean)}/255\n` +
-      `- 高光死白占比 ${(local.clipHigh * 100).toFixed(1)}%，暗部死黑占比 ${(local.clipLow * 100).toFixed(1)}%\n` +
-      `- 背景比主体亮 ${Math.round(local.backlit)}（大于 40 通常是逆光）\n` +
-      `- 清晰度指标 ${local.sharpText || '未测'}`
-    );
-  }
+  if (scene) lines.push('Intended shooting style: ' + scene);
+  if (local) lines.push('On-device measurements (estimates, use the image as evidence): ' +
+    JSON.stringify({ meanBrightness: local.mean, clippedHighlights: local.clipHigh, clippedShadows: local.clipLow }));
   return lines.join('\n\n');
 }
 
@@ -158,7 +137,7 @@ export async function reviewOne(image, context = {}) {
       role: 'user',
       content: [
         { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.data } },
-        { type: 'text', text: (ctx ? ctx + '\n\n' : '') + '看看这张。' },
+        { type: 'text', text: (ctx ? ctx + '\n\n' : '') + 'Review this photo in English.' },
       ],
     }],
   });
@@ -169,14 +148,14 @@ export async function pickBest(images, context = {}) {
   const ctx = contextBlock(context);
   const content = [];
   images.forEach((img, i) => {
-    content.push({ type: 'text', text: `第 ${i + 1} 张：` });
+    content.push({ type: 'text', text: `Photo ${i + 1}:` });
     content.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data } });
   });
   content.push({
     type: 'text',
     text: (ctx ? ctx + '\n\n' : '') +
-      `这 ${images.length} 张是同一组里拍的。挑出最值得留的那张，并把全部排个序。` +
-      '判断标准是「她会不会喜欢这张」，不是技术上哪张最标准。',
+      `Compare these ${images.length} photos. Choose a favorite and rank every photo. ` +
+      'Explain your choices in English, considering the intended photograph.',
   });
 
   return call({
@@ -197,7 +176,7 @@ export async function verifyKey(key) {
     await call({
       model: MODEL,
       max_tokens: 16,
-      messages: [{ role: 'user', content: '回一个字：好' }],
+      messages: [{ role: 'user', content: 'Return JSON with ok set to true.' }],
       output_config: {
         effort: 'low',
         format: {

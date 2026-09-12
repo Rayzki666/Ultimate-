@@ -1,225 +1,107 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0e0f12">
+<meta name="theme-color" content="#101714">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="好好拍">
-<meta name="description" content="帮你把她拍好看，也帮你们俩重新有合照。">
-<title>好好拍</title>
+<meta name="apple-mobile-web-app-title" content="Frame">
+<meta name="description" content="Choose a look. Follow the light. Make your next frame count.">
+<title>Frame — Your AI Camera</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icons/icon-180.png">
 <link rel="stylesheet" href="./css/app.css">
 </head>
 <body>
-
-<!-- ── 取景教练 ───────────────────────────────────────── -->
 <section class="view" id="view-coach" data-view="coach">
   <div class="camera-stage" id="cameraStage">
     <div class="camera-preview">
       <video id="cam" playsinline muted autoplay></video>
-      <canvas id="overlay" aria-label="人物位置与构图参考线"></canvas>
+      <canvas id="overlay" aria-label="Subject and composition guides"></canvas>
       <div class="hud" id="hud" hidden>
-        <div class="live-heading"><span class="live-dot"></span><span id="coachState">实时指导</span><span class="local-label">画面在本机分析</span></div>
+        <div class="live-heading"><span class="live-dot"></span><span id="coachState">Live guidance</span><span class="local-label">On-device</span></div>
         <div class="hud-top">
-          <div class="chip" id="chipLevel"><span class="chip-k">水平</span><span class="chip-v">待测</span></div>
-          <div class="chip" id="chipPitch"><span class="chip-k">俯仰</span><span class="chip-v">待测</span></div>
-          <div class="chip" id="chipLight"><span class="chip-k">光</span><span class="chip-v">待测</span></div>
-          <div class="chip" id="chipSubject" hidden><span class="chip-k">人</span><span class="chip-v">待测</span></div>
+          <div class="chip" id="chipLevel"><span class="chip-k">Roll</span><span class="chip-v">—</span></div>
+          <div class="chip" id="chipPitch"><span class="chip-k">Tilt</span><span class="chip-v">—</span></div>
+          <div class="chip" id="chipLight"><span class="chip-k">Light</span><span class="chip-v">—</span></div>
+          <div class="chip" id="chipSubject" hidden><span class="chip-k">People</span><span class="chip-v">—</span></div>
         </div>
       </div>
     </div>
     <div class="cam-idle" id="camIdle">
       <div class="cam-idle-inner">
         <div class="camera-emblem" aria-hidden="true">◎</div>
-        <p class="eyebrow">好好拍 · AI 相机</p>
-        <h1>看见好画面<br>也知道怎么拍</h1>
-        <p>对准拍摄对象，听一句指导。<br>调整光线与构图，稳住，然后按下快门。</p>
-        <div class="intro-flow"><span>找到人</span><span>调一处</span><span>稳住拍</span></div>
-        <button class="btn btn-primary btn-lg" id="startCam">开启 AI 相机</button>
-        <p class="fine">自动分析人物、光线与构图；首次会下载约 18MB 识别模型。画面留在本机。</p>
+        <p class="eyebrow">FRAME / YOUR AI CAMERA</p>
+        <h1>Find your light.<br>Make your frame.</h1>
+        <p>Choose a look. Get one clear direction.<br>Capture it when the moment feels right.</p>
+        <button class="idle-style" id="idleStyle">Explore shooting styles →</button>
+        <button class="btn btn-primary btn-lg" id="startCam">Open camera</button>
+        <p class="fine">Photos stay on this device. Subject detection downloads about 18 MB on first use.</p>
       </div>
     </div>
-    <div class="cam-error" id="camError" hidden>
-      <p id="camErrorMsg"></p><button class="btn" id="retryCam">重新打开</button>
-    </div>
+    <div class="cam-error" id="camError" hidden><p id="camErrorMsg"></p><button class="btn" id="retryCam">Try again</button></div>
     <div class="cam-stack" id="camStack" hidden>
-      <div class="scene-checks" aria-label="已测项目">
-        <span id="check-light" data-state="unknown">光线 · 待测</span>
-        <span id="check-framing" data-state="unknown">构图 · 待测</span>
-        <span id="check-angle" data-state="unknown">角度 · 待测</span>
-        <progress id="readyProgress" max="1" value="0" aria-label="持续稳定进度"></progress>
+      <button class="active-style" id="activeStyle" aria-label="Change shooting style"><span id="activeStyleName">Free shooting</span><span>Change ↗</span></button>
+      <div class="scene-checks" aria-label="Measured conditions">
+        <span id="check-light" data-state="unknown">Light · —</span><span id="check-framing" data-state="unknown">Frame · —</span><span id="check-angle" data-state="unknown">Angle · —</span>
+        <progress id="readyProgress" max="1" value="0" aria-label="Steadiness"></progress>
       </div>
-      <div class="coach-tip" id="coachTip" hidden>
-        <span class="coach-tip-icon" id="coachTipIcon" aria-hidden="true"></span>
-        <div><strong id="coachTipText" role="status" aria-live="polite"></strong><p id="coachTipReason"></p></div>
+      <div class="coach-tip" id="coachTip" hidden><span class="coach-tip-icon" id="coachTipIcon" aria-hidden="true"></span><div><strong id="coachTipText" role="status" aria-live="polite"></strong><p id="coachTipReason"></p></div></div>
+      <div class="shot-types" id="shotTypes" role="group" aria-label="Framing">
+        <button data-shot="full">Full body</button><button data-shot="half" aria-pressed="true">Portrait</button><button data-shot="close">Close-up</button><button data-shot="duo">Together</button>
       </div>
-      <div class="shot-types" id="shotTypes" role="group" aria-label="拍摄范围">
-        <button data-shot="full">全身</button><button data-shot="half" aria-pressed="true">半身</button>
-        <button data-shot="close">特写</button><button data-shot="duo">合照</button>
-      </div>
-      <div class="composition-types" id="compositionTypes" role="group" aria-label="构图偏好">
-        <span>构图</span>
-        <button data-composition="thirds" aria-pressed="true">三分</button>
-        <button data-composition="center" aria-pressed="false">居中</button>
-        <button data-composition="free" aria-pressed="false">自由</button>
+      <div class="composition-types" id="compositionTypes" role="group" aria-label="Composition">
+        <span>Compose</span><button data-composition="thirds" aria-pressed="true">Thirds</button><button data-composition="center">Center</button><button data-composition="free">Free</button>
       </div>
     </div>
     <div class="cam-bar" id="camBar" hidden>
       <div class="cam-row cam-tools">
-        <button class="cam-btn" id="btnGrid" aria-pressed="true">网格</button>
-        <button class="cam-btn" id="btnTilt" aria-pressed="false">水平仪</button>
-        <button class="cam-btn" id="btnTrack" aria-pressed="false">识别</button>
-        <button class="cam-btn" id="btnVoice" aria-pressed="false">语音</button>
-        <button class="cam-btn" id="btnStop">关闭</button>
+        <button class="cam-btn" id="btnGrid" aria-pressed="true">Grid</button><button class="cam-btn" id="btnTilt" aria-pressed="false">Level</button><button class="cam-btn" id="btnTrack" aria-pressed="false">Detect</button><button class="cam-btn" id="btnVoice" aria-pressed="false">Voice</button><button class="cam-btn" id="btnStop">Close</button>
       </div>
       <div class="shutter-row">
-        <button class="cam-btn gallery-button" id="viewCaptures" disabled aria-label="查看本次拍摄">
-          <span id="captureCount">0</span><span>本次拍摄</span>
-        </button>
-        <button class="shutter-button" id="captureNow" disabled aria-label="拍摄当前画面"><span></span></button>
-        <button class="cam-btn" id="btnFlip" aria-label="切换前后摄像头">前后<br>切换</button>
+        <button class="cam-btn gallery-button" id="viewCaptures" disabled aria-label="View this session"><span id="captureCount">0</span><span>This session</span></button>
+        <button class="shutter-button" id="captureNow" disabled aria-label="Take photo"><span></span></button>
+        <button class="cam-btn" id="btnFlip" aria-label="Switch camera">Flip ↻</button>
       </div>
-      <div class="capture-note"><span id="captureStatus" role="status">随时可拍 · 绿灯是时机建议</span>
-        <label class="native-camera-link" tabindex="0" role="button" id="btnShutter">系统相机
-          <input type="file" accept="image/*" capture="environment" id="nativeShot" hidden>
-        </label>
-      </div>
+      <div class="capture-note"><span id="captureStatus" role="status">Shoot anytime · Green means steady</span><label class="native-camera-link" tabindex="0" role="button" id="btnShutter">Native camera<input type="file" accept="image/*" capture="environment" id="nativeShot" hidden></label></div>
     </div>
   </div>
   <div class="coach-help" id="coachHelp">
-    <details>
-      <summary>如何拍出更满意的照片</summary>
-      <ul class="tight">
-        <li><b>先选范围，再选构图。</b>全身、半身、特写、合照有不同的起始建议。居中、三分、自由都可以。</li>
-        <li><b>一次只调一处。</b>大字告诉你下一步，下面解释原因；点「语音」可以开关播报。</li>
-        <li><b>稳住再拍。</b>已测条件满足、人物位置持续稳定后亮绿灯。未识别、画面中断、合照只看到一人时不会亮灯。</li>
-        <li><b>绿灯不代表完美。</b>当前没有测量眼睛是否睁开、表情、背景内容或真实对焦；也不保证每一张清晰。</li>
-        <li><b>照片与取景框一致。</b>网页快门保存视频帧，画质受设备与浏览器限制；需要原生画质时可尝试「系统相机」。</li>
-        <li><b>照片暂存在本次页面会话。</b>请在选片页保存，刷新页面会丢失。本机分析不会上传照片；AI 点评仍需主动点击。</li>
-      </ul>
-    </details>
+    <p class="style-live-note" id="styleLiveNote">Choose a style to shape your live guidance.</p>
+    <details><summary>About the guidance</summary><p class="fine">Guidance adapts to measured light and subject position. Style suggestions are shooting directions, not filters. Background objects, expressions and focus are not checked. Save session photos before refreshing.</p></details>
   </div>
 </section>
-
-<!-- ── 配方 ───────────────────────────────────────────── -->
-<section class="view" id="view-recipes" data-view="recipes" hidden>
-  <header class="vh">
-    <h1>拍摄配方</h1>
-    <p class="sub">先选你现在在哪儿。每张卡是一套能直接照做的动作。</p>
-  </header>
-  <div class="seg" id="recipeFilter"></div>
-  <div class="cards" id="recipeList"></div>
+<section class="view" id="view-styles" data-view="styles" hidden>
+  <header class="vh style-header"><p class="eyebrow">THE LOOKBOOK</p><h1>A mood for every frame.</h1><p class="sub">Choose your intention. We will guide the shot.</p></header>
+  <div class="style-intro"><span>01 / CHOOSE A LOOK</span><span>02 / FOLLOW THE SCENE</span></div>
+  <div class="style-list" id="styleList"></div>
+  <div class="style-footer"><button class="btn btn-ghost" id="clearStyle">Shoot without a preset</button><p class="fine">Illustrations show framing ideas. Presets guide how you shoot; they do not apply color filters.</p></div>
 </section>
-
-<!-- ── 话术 ───────────────────────────────────────────── -->
-<section class="view" id="view-cues" data-view="cues" hidden>
-  <header class="vh">
-    <h1>你该说什么</h1>
-    <p class="sub">「笑一个」是最没用的一句话。下面这些是有用的。</p>
-  </header>
-  <div class="cue-shuffle">
-    <button class="btn btn-primary" id="cueRandom">随机抽一句用</button>
-    <div class="cue-drawn" id="cueDrawn" hidden></div>
-  </div>
-  <div class="cards" id="cueList"></div>
-</section>
-
-<!-- ── 合照 ───────────────────────────────────────────── -->
-<section class="view" id="view-duo" data-view="duo" hidden>
-  <header class="vh">
-    <h1>两个人</h1>
-    <p class="sub">她说的其实是这件事：这几年没有你们俩的照片了。</p>
-  </header>
-
-  <div class="timer-card">
-    <div class="timer-display" id="timerDisplay">10</div>
-    <div class="timer-actions">
-      <button class="btn" data-timer="3">3 秒</button>
-      <button class="btn" data-timer="10">10 秒</button>
-      <button class="btn btn-primary" id="timerStart">开始倒数</button>
-    </div>
-    <p class="fine">倒数用的是声音和震动，你可以把手机架好之后背对着它跑位。</p>
-  </div>
-
-  <div class="cards" id="duoList"></div>
-</section>
-
-<!-- ── 选片 ───────────────────────────────────────────── -->
 <section class="view" id="view-review" data-view="review" hidden>
-  <header class="vh">
-    <h1>选片与复盘</h1>
-    <p class="sub">拍完导进来，看看这一批哪张能留，以及下次改什么。</p>
-  </header>
-
-  <label class="dropzone" id="dropzone">
-    <input type="file" accept="image/*" multiple id="reviewInput" hidden>
-    <span class="dz-title">选照片</span>
-    <span class="dz-sub">可以一次选一批。照片不会离开你的手机，除非你开了 AI 点评。</span>
-  </label>
-
-  <div class="review-grid" id="reviewGrid"></div>
-  <div class="checklist" id="localChecklist" hidden></div>
+  <header class="vh"><p class="eyebrow">YOUR FRAMES</p><h1>Photos</h1><p class="sub">Keep the moments that feel like you.</p></header>
+  <label class="dropzone" id="dropzone"><input type="file" accept="image/*" multiple id="reviewInput" hidden><span class="dz-title">Choose photos</span><span class="dz-sub">Review on your device. Cloud reviews only run when you ask.</span></label>
+  <div class="review-grid" id="reviewGrid"></div><div class="checklist" id="localChecklist" hidden></div>
 </section>
-
-<!-- ── 她 ─────────────────────────────────────────────── -->
-<section class="view" id="view-her" data-view="her" hidden>
-  <header class="vh">
-    <h1>她的说明书</h1>
-    <p class="sub">与其猜，不如让她自己说。这份问卷是给她填的，三分钟。</p>
-  </header>
-
-  <div class="her-state" id="herState"></div>
-
-  <div class="survey" id="survey" hidden></div>
-
+<section class="view" id="view-settings" data-view="settings" hidden>
+  <header class="vh"><p class="eyebrow">MAKE IT YOURS</p><h1>Settings</h1><p class="sub">Simple controls. Clear choices.</p></header>
   <div class="settings">
-    <details>
-      <summary>AI 点评（可选）</summary>
-      <div class="settings-body">
-        <p class="fine">
-          填入你自己的 Anthropic API Key 就能用 Claude 看照片给意见。Key 只存在这台设备的浏览器里，
-          请求直接从你手机发到 Anthropic，不经过任何中间服务器。不填也不影响前面所有功能。
-        </p>
-        <label class="field">
-          <span>API Key</span>
-          <input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off" autocapitalize="off" spellcheck="false">
-        </label>
-        <div class="row">
-          <button class="btn btn-primary" id="saveKey">保存</button>
-          <button class="btn btn-ghost" id="clearKey">清除</button>
-          <span class="key-status" id="keyStatus"></span>
-        </div>
-      </div>
-    </details>
-    <details>
-      <summary>关于与数据</summary>
-      <div class="settings-body">
-        <p class="fine">
-          「好好拍」是一个纯前端网页应用，没有服务器、没有账号、不收集任何数据。
-          问卷答案和偏好档案存在你手机浏览器的本地存储里。清除浏览器数据会一并清掉。
-        </p>
-        <button class="btn btn-ghost" id="exportData">导出我的数据</button>
-        <button class="btn btn-ghost" id="wipeData">清空全部数据</button>
-      </div>
-    </details>
+    <details open><summary>Optional AI photo review</summary><div class="settings-body">
+      <p class="fine">Add your own Anthropic API key to request a photo review. Only the photos you choose to review are sent to Anthropic. Live camera guidance stays on this device. Provider charges may apply.</p>
+      <label class="field"><span>API key</span><input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <div class="row"><button class="btn btn-primary" id="saveKey">Save key</button><button class="btn btn-ghost" id="clearKey">Remove key</button></div><p class="key-status" id="keyStatus" role="status"></p>
+    </div></details>
+    <details><summary>Your data</summary><p class="fine">Settings and your key are stored in this browser. Session photos disappear when you refresh; save them first.</p><div class="row"><button class="btn btn-ghost" id="exportData">Export preferences</button><button class="btn btn-ghost" id="wipeData">Reset preferences</button></div></details>
+    <p class="fine">Frame · English interface<br>Website photos use the camera preview resolution. For your phone camera features and full resolution, try Native camera.</p>
   </div>
 </section>
-
-<!-- ── 底部导航 ───────────────────────────────────────── -->
-<nav class="tabbar" id="tabbar">
-  <button class="tab" data-go="coach" aria-current="true"><span class="ti" aria-hidden="true">◎</span>取景</button>
-  <button class="tab" data-go="recipes"><span class="ti" aria-hidden="true">▤</span>配方</button>
-  <button class="tab" data-go="cues"><span class="ti" aria-hidden="true">“︎</span>话术</button>
-  <button class="tab" data-go="duo"><span class="ti" aria-hidden="true">◐</span>合照</button>
-  <button class="tab" data-go="review"><span class="ti" aria-hidden="true">✓</span>选片</button>
-  <button class="tab" data-go="her"><span class="ti" aria-hidden="true">♡</span>她</button>
+<nav class="tabbar" id="tabbar" aria-label="Main navigation">
+  <button class="tab" data-go="coach" aria-current="true"><span class="ti" aria-hidden="true">◎</span>Camera</button>
+  <button class="tab" data-go="styles"><span class="ti" aria-hidden="true">▧</span>Styles</button>
+  <button class="tab" data-go="review"><span class="ti" aria-hidden="true">▤</span>Photos</button>
+  <button class="tab" data-go="settings"><span class="ti" aria-hidden="true">⚙</span>Settings</button>
 </nav>
-
 <div class="toast" id="toast" hidden></div>
-
 <script type="module" src="./js/app.js"></script>
 </body>
 </html>
