@@ -238,12 +238,27 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.locator('#activeStyleName').innerText(), 'Travel Story');
     await page.waitForFunction(() => document.querySelector('#toast').hidden);
     await page.screenshot({ path: 'test-results/camera-small.png', fullPage: true });
+    // Mobile browser chrome reduces the visual viewport. An expanded drawer must stay above every camera control.
+    await page.setViewportSize({ width: 390, height: 650 });
+    await page.click('#framingPanel summary');
+    await page.waitForFunction(() => document.querySelector('#framingPanel').open);
+    const openStack = await page.locator('#camStack').boundingBox();
+    const openBar = await page.locator('#camBar').boundingBox();
+    const openChips = await page.locator('.hud-top').boundingBox();
+    const shotOptions = await page.locator('#shotTypes').boundingBox();
+    const compositionOptions = await page.locator('#compositionTypes').boundingBox();
+    assert.ok(openStack.y >= openChips.y + openChips.height + 8, 'expanded framing clears the live HUD');
+    assert.ok(openStack.y + openStack.height + 4 <= openBar.y, 'expanded framing stays above camera controls');
+    assert.ok(shotOptions.y + shotOptions.height <= openStack.y + openStack.height, 'shot options remain inside the drawer');
+    assert.ok(compositionOptions.y + compositionOptions.height <= openStack.y + openStack.height, 'composition options remain inside the drawer');
+    await page.screenshot({ path: 'test-results/camera-framing-open.png', fullPage: true });
     const smallShutter = await page.locator('#captureNow').boundingBox();
-    assert.ok(smallShutter.y + smallShutter.height <= 740 - 58, 'small phone shutter remains reachable');
+    const compactNav = await page.locator('#tabbar').boundingBox();
+    assert.ok(smallShutter.y + smallShutter.height <= compactNav.y, 'compact phone shutter remains above navigation');
     await page.click('#btnStop');
     assert.equal(await page.evaluate(() => window.__coach.stream), null);
     assert.deepEqual(errors, []);
-    console.log('Browser smoke passed: bundled model, readiness UI, capture/download, navigation, phone layouts, cleanup, AI consent/readiness/expiry and errors.');
+    console.log('Browser smoke passed: bundled model, readiness UI, capture/download, navigation, phone layouts, expanded framing, cleanup, AI consent/readiness/expiry and errors.');
     await context.close();
   } catch (error) {
     if (page) {

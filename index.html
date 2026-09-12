@@ -43,7 +43,8 @@
       </div>
     </div>
     <div class="cam-error" id="camError" hidden><p id="camErrorMsg"></p><button class="btn" id="retryCam">Try again</button></div>
-    <div class="cam-stack" id="camStack" hidden>
+    <div class="camera-controls">
+      <div class="cam-stack" id="camStack" hidden>
       <button class="active-style" id="activeStyle" aria-label="Change shooting style"><span id="activeStyleName">Free shooting</span><span>Change ↗</span></button>
       <div class="readiness-heading"><span id="readinessTitle" role="status" aria-live="polite">CHECKS INCOMPLETE</span><span id="readinessCount">0 / 5 checks</span></div>
       <div class="scene-checks" aria-label="Readiness checks">
@@ -61,8 +62,8 @@
           <span>Compose</span><button data-composition="thirds" aria-pressed="true">Thirds</button><button data-composition="center">Center</button><button data-composition="free">Free</button>
         </div>
       </details>
-    </div>
-    <div class="cam-bar" id="camBar" hidden>
+      </div>
+      <div class="cam-bar" id="camBar" hidden>
       <div class="cam-row cam-tools">
         <button class="cam-btn" id="btnGrid" aria-pressed="true">Grid</button><button class="cam-btn" id="btnTilt" aria-pressed="false">Level</button><button class="cam-btn" id="btnTrack" aria-pressed="false">Detect</button><button class="cam-btn" id="btnVoice" aria-pressed="false">Voice</button><button class="cam-btn" id="btnAI" aria-pressed="false">AI</button><button class="cam-btn" id="btnStop">Close</button>
       </div>
@@ -72,6 +73,7 @@
         <button class="cam-btn" id="btnFlip" aria-label="Switch camera">Flip ↻</button>
       </div>
       <div class="capture-note"><span id="captureStatus" role="status">Shoot anytime · Green means AI suggests now</span><label class="native-camera-link" tabindex="0" role="button" id="btnShutter">Native camera<input type="file" accept="image/*" capture="environment" id="nativeShot" hidden></label></div>
+      </div>
     </div>
   </div>
   <div class="coach-help" id="coachHelp">
