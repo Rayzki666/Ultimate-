@@ -7,9 +7,9 @@ export function parseVerdict(value) {
       typeof value.action !== 'string' || value.action.length > 140 ||
       !['camera', 'subject', 'none'].includes(value.actor)) throw new Error('Invalid AI response');
   const checks = value.checks;
-  for (const key of ['light', 'composition', 'background', 'pose'])
+  for (const key of ['light', 'composition', 'background', 'pose', 'eyes'])
     if (!checks || !['good', 'adjust', 'unknown'].includes(checks[key])) throw new Error('Incomplete AI checks');
-  const normalizedChecks = Object.fromEntries(['light', 'composition', 'background', 'pose'].map(k => [k, checks[k]]));
+  const normalizedChecks = Object.fromEntries(['light', 'composition', 'background', 'pose', 'eyes'].map(k => [k, checks[k]]));
   if (value.decision === 'shoot' && (value.confidence < .8 || Object.values(checks).some(v => v !== 'good')))
     return { decision: 'uncertain', confidence: value.confidence, reason: 'AI could not confidently confirm this frame.',
       action: '', actor: 'none', checks: normalizedChecks };
@@ -32,7 +32,11 @@ export function sceneChanged(a, b) {
   if (a.people.some((p,i) => p.length !== b.people[i].length ||
       p.some((v,j) => !Number.isFinite(v) || !Number.isFinite(b.people[i][j]) || Math.abs(v - b.people[i][j]) > .035))) return true;
   const diff = a.signature.reduce((n,v,i) => n + Math.abs(v-b.signature[i]), 0) / a.signature.length;
-  return diff > 12;
+  if (diff > 12) return true;
+  if (!Array.isArray(a.faceSignature) || !Array.isArray(b.faceSignature) ||
+      a.faceSignature.length !== b.faceSignature.length || !a.faceSignature.length) return true;
+  const faceDiff = a.faceSignature.reduce((n,v,i) => n + Math.abs(v-b.faceSignature[i]), 0) / a.faceSignature.length;
+  return faceDiff > .025;
 }
 export class MomentGate {
   constructor() { this.invalidate(); }

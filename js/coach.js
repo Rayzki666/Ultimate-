@@ -395,7 +395,7 @@ export class Coach {
     const {w,h}=this._box;
     return { context: [this._session,this.facing,this.style?.id,this.shotType,this.composition,w,h].join(':'),
       people: this.subjects.map(s=>[s.head.x,s.head.y,s.box?.y0,s.box?.y1,
-        ...[11,12,15,16,31,32].flatMap(i=>s.pts?.[i]?.visibility>=.6?[s.pts[i].x,s.pts[i].y]:[-1,-1])]), signature };
+        ...[11,12,15,16,31,32].flatMap(i=>s.pts?.[i]?.visibility>=.6?[s.pts[i].x,s.pts[i].y]:[-1,-1])]), signature, faceSignature: this.instant.signature || [] };
   }
 
   _aiPreview(crop) {
@@ -588,7 +588,6 @@ export class Coach {
     if (!this.running) return;
     const now = performance.now();
     this._detect(now);
-    if (this.ai.enabled && this.video.readyState >= 2) this.facePulse.sample(this.video, now);
     this._draw();
     this._raf = requestAnimationFrame(() => this._loop());
   }

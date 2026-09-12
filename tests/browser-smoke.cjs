@@ -39,7 +39,7 @@ const server = http.createServer((req, res) => {
       const body=route.request().postDataJSON();
       assert.match(body.image,/^data:image\/jpeg;base64,/);
       if(aiMode==='error')return route.fulfill({status:502,headers,body:'{}'});
-      return route.fulfill({headers,body:JSON.stringify({id:body.id,result:{decision:aiMode,confidence:.91,reason:'The light and background work well together.',action:aiMode==='adjust'?'Move a little to the right':'',actor:aiMode==='adjust'?'camera':'none',checks:{light:'good',composition:'good',background:aiMode==='shoot'?'good':'unknown',pose:'good'}}})});
+      return route.fulfill({headers,body:JSON.stringify({id:body.id,result:{decision:aiMode,confidence:.91,reason:'The light and background work well together.',action:aiMode==='adjust'?'Move a little to the right':'',actor:aiMode==='adjust'?'camera':'none',checks:{light:'good',composition:'good',background:aiMode==='shoot'?'good':'unknown',pose:'good',eyes:'good'}}})});
     });
     page.on('pageerror', error => { errors.push(error.message); console.error('PAGE ERROR:', error.message); });
     await page.goto(url + '/#debug');
@@ -139,15 +139,14 @@ const server = http.createServer((req, res) => {
     assert.equal(aiCalls,0,'cancelled consent does not upload');
     await page.click('#btnAI');
     await page.click('#confirmAI');
-    await page.waitForFunction(()=>window.__coach.facePulse.state!=='loading',null,{timeout:90000});
-    assert.equal(await page.evaluate(()=>window.__coach.facePulse.state),'ready','real face worker/model loads');
-    assert.equal(aiCalls,0,'unknown face never becomes AI ready');
+    assert.equal(await page.evaluate(()=>window.__coach.facePulse.state),'ready','local face-detail check is available');
+    assert.equal(aiCalls,0,'unclear face never becomes AI ready');
     await page.evaluate(()=>{
       const c=window.__coach;
       c.facePulse.stop();
       c.facePulse.sample=()=>{};
       c._testInstant='good';
-      c.facePulse.read=()=>({state:c._testInstant,text:c._testInstant==='good'?'Eyes open; face detail detected':'Wait for open eyes'});
+      c.facePulse.read=()=>({state:c._testInstant,text:c._testInstant==='good'?'Face detail detected':'Face detail is unclear',signature:Array(32).fill(c._testFace ?? .5)});
       const original=c._sceneSnapshot.bind(c);
       c._testBackground=100;
       c._sceneSnapshot=()=>{const s=original();return s&&{...s,signature:Array(192).fill(c._testBackground)};};
@@ -162,6 +161,12 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.locator('.ready-stamp').evaluate(el=>getComputedStyle(el).opacity),'0');
     assert.equal(await page.locator('#captureNow').isEnabled(),true);
     await page.evaluate(()=>window.__coach._testInstant='good');
+    await page.waitForFunction(()=>window.__coach.aiReady,null,{timeout:15000});
+    // A facial change withdraws the sampled recommendation until AI checks a fresh preview.
+    await page.evaluate(()=>{const c=window.__coach;c.ai.lastAttempt=Infinity;c._testFace=.65;});
+    await page.waitForFunction(()=>!window.__coach.aiReady);
+    assert.equal(await page.evaluate(()=>window.__coach.ai.gate.result),null);
+    await page.evaluate(()=>{window.__coach.ai.lastAttempt=-Infinity;});
     await page.waitForFunction(()=>window.__coach.aiReady,null,{timeout:15000});
     // Background changes invalidate cloud advice even with an unchanged body pose.
     aiMode='uncertain';

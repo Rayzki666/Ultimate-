@@ -23,7 +23,7 @@ The gateway accepts JPEG previews only, limits request size, applies origin chec
 1. Refresh Frame in Safari, then open Settings > Live AI guidance.
 2. Enter the service origin and its APP_TOKEN access code, then Connect service.
 3. Return to Camera, Open camera, tap AI, and read the destination disclosure.
-4. Enable for this session. The face model loads in a worker, then clear steady frames can be sampled.
+4. Enable for this session. Local face-detail checks start, then clear steady frames can be sampled.
 5. Tap AI again or close the camera to stop sharing. Leaving the camera tab or backgrounding the page also stops it.
 
 The service address is remembered on this browser. The access code is memory-only and must be re-entered after reload; it is excluded from preference export. Camera-session consent is never persisted. Existing optional photo review uses its separate user-provided key.
@@ -32,8 +32,7 @@ The service address is remembered on this browser. The access code is memory-onl
 
 - Basic guidance uses pose landmarks, measured light and device orientation. Visible head/shoulders are checked, with feet for full-body shots; raised or hidden hands no longer fail simply because a template has lowered hands.
 - AI does not match example poses or rate attractiveness, body size or identity. It considers scene lighting, composition, background and pose relationships.
-- Instant face checks use MediaPipe Face Landmarker eye-blink coefficients and a face-region detail heuristic. This cannot certify autofocus, expression quality, or absence of all blur. Small, obscured or uncertain faces block the AI signal rather than passing.
-- The additional face model comes from Google's model host on first use; it is not bundled with this repository. If that host or the worker is unavailable, basic guidance still works and the AI signal remains unavailable.
+- Cloud analysis checks whether visible eyes look clearly open in the sampled still. Local face-region detail and eye-band change heuristics invalidate a recommendation when the face changes. They cannot certify autofocus, expression quality, catch every blink, or prove the absence of blur. Small, obscured or unclear faces block the AI signal rather than passing.
 - Preview JPEGs match the visible crop and front-camera mirroring, maximum edge 640 pixels, quality 0.65.
 - Client attempts are at least 5 seconds apart, no queue, max 60 attempts per enabled session. Three consecutive network/model failures pause AI.
 - Every result is bound to a frame ID, camera/session, style, crop size and scene signature. Significant subject, lighting or background changes invalidate the result and abort an obsolete request. Switching styles/cameras, capture, navigation and stop invalidate it too.
@@ -44,10 +43,9 @@ The service address is remembered on this browser. The access code is memory-onl
 
 ## Verification
 
-CI tests the contract, expiry and invalidation, single in-flight requests, consent/stop flows, backend authentication/CORS/input validation/rate limits and mocked provider failures. Browser tests use deterministic observations to verify the signal and load the real face worker/model separately. A mocked shoot verdict is not a live-model quality test.
+CI tests the contract, expiry and invalidation, single in-flight requests, consent/stop flows, backend authentication/CORS/input validation/rate limits and mocked provider failures. Browser tests use deterministic observations to verify the signal, facial-change invalidation and failure handling. A mocked shoot verdict is not a live-model quality test.
 
 Before production use, verify the chosen live model/key on the deployed host and test on the target iPhone with motion, occlusion, varied light, glasses, different skin tones and body types. Real iPhone performance and aesthetic accuracy cannot be established by desktop Chromium emulation.
 
 References:
 - [Anthropic vision API](https://platform.claude.com/docs/en/build-with-claude/vision)
-- [MediaPipe Face Landmarker for Web](https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/web_js)

@@ -4,7 +4,7 @@ import { createApp, validateInput } from '../server/server.mjs';
 const token='private-service-code-'.repeat(3),origin='https://rayzki666.github.io';
 const bytes=Buffer.alloc(120,1);bytes[0]=255;bytes[1]=216;bytes[118]=255;bytes[119]=217;
 const input={id:'1',image:'data:image/jpeg;base64,'+bytes.toString('base64'),style:'golden',shotType:'half',composition:'thirds'};
-const good={decision:'shoot',confidence:.9,reason:'The light and background complement this portrait.',action:'',actor:'none',checks:{light:'good',composition:'good',background:'good',pose:'good'}};
+const good={decision:'shoot',confidence:.9,reason:'The light and background complement this portrait.',action:'',actor:'none',checks:{light:'good',composition:'good',background:'good',pose:'good',eyes:'good'}};
 async function fixture(fetcher,run,options={}){
  const server=createApp({key:'server-secret',model:'test-vision-model',token,origin,fetcher,...options});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));

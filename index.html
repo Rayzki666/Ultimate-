@@ -76,7 +76,7 @@
   </div>
   <div class="coach-help" id="coachHelp">
     <p class="style-live-note" id="styleLiveNote">Choose a style to shape your live guidance.</p>
-    <details><summary>About the guidance</summary><p class="fine">Guidance adapts to measured light and subject position. Style suggestions are shooting directions, not filters. Basic checks cover visible head and shoulders (face landmarks in Close-up), light, framing and stability. Poses are flexible. Optional cloud AI considers the scene and style; local face checks estimate open eyes and visible detail. These are fallible heuristics, not precise focus or beauty scores. Full AI readiness also needs angle access. Slow, missing or outdated analysis never triggers the AI signal. Save session photos before refreshing.</p></details>
+    <details><summary>About the guidance</summary><p class="fine">Guidance adapts to measured light and subject position. Style suggestions are shooting directions, not filters. Basic checks cover visible head and shoulders (face landmarks in Close-up), light, framing and stability. Poses are flexible. Optional cloud AI considers the scene and style; cloud AI checks whether visible eyes look open in its sampled frame; local checks watch face detail and facial changes. These are fallible heuristics, not precise focus or beauty scores. Full AI readiness also needs angle access. Slow, missing or outdated analysis never triggers the AI signal. Save session photos before refreshing.</p></details>
   </div>
 </section>
 <section class="view" id="view-styles" data-view="styles" hidden>
@@ -120,7 +120,7 @@
 <dialog id="aiConsent" class="example-dialog" aria-labelledby="aiConsentTitle">
   <h2 id="aiConsentTitle">Enable live AI guidance?</h2>
   <p>Small camera previews will be sent to <strong id="aiDestination"></strong> and Anthropic to assess this scene and your selected style.</p>
-  <p class="fine">Up to one preview every 5 seconds, with a maximum of 60 previews per session. No microphone audio is sent. Face checks run on your device and download an additional model on first use. Provider charges may apply. Closing the camera stops sharing.</p>
+  <p class="fine">Up to one preview every 5 seconds, with a maximum of 60 previews per session. No microphone audio is sent. Face-detail and facial-change checks run on your device. Provider charges may apply. Closing the camera stops sharing.</p>
   <div class="row"><button class="btn btn-primary" id="confirmAI">Enable for this session</button><button class="btn btn-ghost" id="cancelAI">Cancel</button></div>
 </dialog>
 <div class="toast" id="toast" hidden></div>

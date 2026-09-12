@@ -1,7 +1,7 @@
 // 离线缓存。拍照的地方常常没信号，所以整个 App 要能离线跑。
 // 改了文件记得把 VERSION 往上加一位，否则用户拿到的还是旧缓存。
 
-const VERSION = 'haohaopai-v8';
+const VERSION = 'haohaopai-v9';
 const VENDOR  = 'haohaopai-vendor-v1';   // 识别模型单独一个缓存，改版本时不必重下 17MB
 
 // 自动认人的 WASM 和模型。URL 带版本号、内容不变，所以缓存优先，存下就不再回网。
@@ -21,7 +21,6 @@ const SHELL = [
   './js/ai-contract.mjs',
   './js/ai-moment.js',
   './js/instant.js',
-  './js/face-worker.mjs',
   './js/guidance.js',
   './js/capture.js',
   './js/content.js',

@@ -4,8 +4,8 @@ import { parseVerdict, endpointURL, sceneChanged, MomentGate, MAX_AGE_MS } from 
 import { AiMoment } from '../js/ai-moment.js';
 import { eyeState, laplacian } from '../js/instant.js';
 
-const scene={context:'camera:golden',people:[[.3,.2,.1,.8,.25,.4]],signature:Array(192).fill(100)};
-const good={decision:'shoot',confidence:.9,reason:'The subject light and background work together.',action:'',actor:'none',checks:{light:'good',composition:'good',background:'good',pose:'good'}};
+const scene={context:'camera:golden',people:[[.3,.2,.1,.8,.25,.4]],signature:Array(192).fill(100),faceSignature:Array(32).fill(.5)};
+const good={decision:'shoot',confidence:.9,reason:'The subject light and background work together.',action:'',actor:'none',checks:{light:'good',composition:'good',background:'good',pose:'good',eyes:'good'}};
 const update=(gate,now,extra={})=>gate.update({scene,now,basicReady:true,instant:'good',...extra});
 function accepted(){const g=new MomentGate();g.begin('1',0,scene);assert.equal(g.accept('1',good,scene,100),true);return g;}
 test('unknown checks and low confidence cannot become shoot; malformed output rejected',()=>{
@@ -44,7 +44,8 @@ test('movement, style/camera/crop changes, visibility and background differences
   const variants=[
     {...scene,context:'camera:travel'}, {...scene,people:[]},
     {...scene,people:[[.4,...scene.people[0].slice(1)]]},
-    {...scene,signature:scene.signature.map(()=>130)},null
+    {...scene,signature:scene.signature.map(()=>130)},
+    {...scene,faceSignature:scene.faceSignature.map(()=>.6)},null
   ];
   for(const changed of variants){const g=accepted();assert.equal(sceneChanged(scene,changed),true);update(g,200,{scene:changed});assert.equal(g.result,null);}
   assert.equal(sceneChanged(scene,structuredClone(scene)),false);
@@ -85,14 +86,6 @@ test('60-frame session cap prevents another upload',async()=>{
   let calls=0;const a=new AiMoment({fetcher:async()=>{calls++;}});
   a.endpoint='https://camera.example';a.token='a'.repeat(32);a.enable();a.count=60;
   await a.analyze(scene,'image',{});assert.equal(calls,0);assert.equal(a.status,'limit');
-});
-test('eye checks fail closed for absent, ambiguous or invalid measurements',()=>{
-  const cats=(a,b)=>[{categoryName:'eyeBlinkLeft',score:a},{categoryName:'eyeBlinkRight',score:b}];
-  assert.equal(eyeState(cats(.1,.1)),'open');
-  assert.equal(eyeState(cats(.9,.1)),'closed');
-  assert.equal(eyeState(cats(.4,.1)),'unknown');
-  assert.equal(eyeState(cats(NaN,.1)),'unknown');
-  assert.equal(eyeState([]),'unknown');
 });
 test('detail heuristic distinguishes a flat face region from visible edges',()=>{
   const flat=new Uint8ClampedArray(64*64*4).fill(128);
