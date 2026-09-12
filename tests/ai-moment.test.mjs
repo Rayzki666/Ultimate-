@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseVerdict, endpointURL, sceneChanged, MomentGate, MAX_AGE_MS } from '../js/ai-contract.mjs';
 import { AiMoment } from '../js/ai-moment.js';
-import { eyeState, laplacian } from '../js/instant.js';
+import { laplacian } from '../js/instant.js';
 
 const scene={context:'camera:golden',people:[[.3,.2,.1,.8,.25,.4]],signature:Array(192).fill(100),faceSignature:Array(32).fill(.5)};
 const good={decision:'shoot',confidence:.9,reason:'The subject light and background work together.',action:'',actor:'none',checks:{light:'good',composition:'good',background:'good',pose:'good',eyes:'good'}};
