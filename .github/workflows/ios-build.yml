@@ -1,0 +1,69 @@
+name: iOS simulator build
+
+on:
+  push:
+    branches:
+      - claude/ai-photo-assistant-4cxjbo
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-simulator:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Capacitor
+        run: npm ci --no-audit --no-fund
+
+      - name: Run logic tests
+        run: npm test
+
+      - name: Prepare web assets
+        run: npm run build:web
+
+      - name: Generate iOS project
+        run: |
+          npx cap add ios --packagemanager SPM
+          npx cap sync ios
+          node scripts/configure-ios.mjs
+
+      - name: Build unsigned simulator app
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package simulator app and generated source
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/DerivedData/Build/Products/Debug-iphonesimulator/App.app \
+            build/Frame-iOS-Simulator.zip
+          ditto -c -k --sequesterRsrc --keepParent ios build/Frame-iOS-Source.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frame-ios-simulator
+          path: |
+            build/Frame-iOS-Simulator.zip
+            build/Frame-iOS-Source.zip
+          if-no-files-found: error
+          retention-days: 14

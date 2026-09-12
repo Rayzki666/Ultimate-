@@ -34,7 +34,7 @@ Up to 20 photos are held in the page session. **Save photos before refreshing.**
 
 ## Deployment and updates
 
-No build step is required. Host the repository root over HTTPS. For GitHub Pages, keep the selected implementation branch as the source. After deployment, save session photos, then refresh Safari to load the latest app. Service-worker shell version: v6.
+No build step is required. Host the repository root over HTTPS. For GitHub Pages, keep the selected implementation branch as the source. After deployment, save session photos, then refresh Safari to load the latest app. Service-worker shell version: v11.
 
 ## Validation
 
@@ -47,3 +47,13 @@ No build step is required. Host the repository root over HTTPS. For GitHub Pages
 ## Optional live AI suggestions
 
 A private gateway and explicit camera-session consent now enable recent scene/style advice. Basic checks and AI shoot suggestions have distinct signals; missing or stale AI results do not turn the AI indicator green. Flexible poses replace the universal lowered-hands rule. The camera now fills the shooting stage while secondary framing choices stay in a compact drawer. The gateway requires deployment and server-side provider credentials before cloud analysis is usable. See [setup, limits and verification](docs/live-ai-setup.md).
+
+## iPhone app build
+
+The same interface can now be packaged as a native iOS application with Capacitor 8. The web files are collected into `dist/`, then a macOS GitHub Actions runner generates an Xcode project and builds an unsigned iPhone Simulator app. No Apple signing secret is stored in the repository.
+
+- Configuration: [`capacitor.config.json`](capacitor.config.json)
+- Build and native roadmap: [`docs/ios-app.md`](docs/ios-app.md)
+- Cloud build: [`.github/workflows/ios-build.yml`](.github/workflows/ios-build.yml)
+
+The current bundle identifier, `com.rayzki.framecamera`, is provisional until the App Store identity is chosen.

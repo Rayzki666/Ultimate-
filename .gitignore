@@ -1,2 +1,9 @@
 # 本地跑测试时截的图
 shot-*.png
+
+# Generated JavaScript and Capacitor build output
+node_modules/
+dist/
+build/
+ios/
+.DS_Store
