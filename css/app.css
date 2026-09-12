@@ -645,3 +645,12 @@ body.cam-on .camera-stage[data-readiness="ready"] .cam-stack { background:#b9ffd
   body.cam-on .cam-stack { bottom:126px; }
   body.cam-on .coach-tip { min-height:52px; }
 }
+
+/* Keep the final AI go-signal clear of the live HUD and the floating controls. */
+body.cam-on .ready-stamp {
+  top: calc(var(--safe-t) + 86px);
+  bottom: auto;
+}
+@media (max-height: 740px) {
+  body.cam-on .ready-stamp { top: calc(var(--safe-t) + 76px); }
+}

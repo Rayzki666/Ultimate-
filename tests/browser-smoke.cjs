@@ -156,6 +156,11 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.locator('#readinessTitle').innerText(),'AI SUGGESTS: SHOOT NOW');
     assert.equal(await page.locator('#shutterCue').innerText(),'SHOOT NOW');
     await page.screenshot({path:'test-results/camera-ai-ready.png',fullPage:true});
+    const readyStamp = await page.locator('.ready-stamp').boundingBox();
+    const readyChips = await page.locator('.hud-top').boundingBox();
+    const readyStack = await page.locator('#camStack').boundingBox();
+    assert.ok(readyStamp.y >= readyChips.y + readyChips.height + 8, 'AI go-signal clears the live HUD');
+    assert.ok(readyStamp.y + readyStamp.height + 8 < readyStack.y, 'AI go-signal clears the floating controls');
     await page.evaluate(()=>window.__coach._testInstant='warn');
     await page.waitForFunction(()=>!window.__coach.aiReady);
     assert.equal(await page.locator('.ready-stamp').evaluate(el=>getComputedStyle(el).opacity),'0');
