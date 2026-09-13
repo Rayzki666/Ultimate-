@@ -15,7 +15,7 @@ import { SubjectTracker, readSubject, drawSkeleton, coverMapper } from './vision
 import { Voice } from './speak.js';
 import { SHOT_TYPES, targetFor, assessScene, ReadinessGate } from './guidance.js';
 import { getStyle, styleHint } from './styles.js';
-import { captureFrame } from './capture.js';
+import { WebCameraBackend } from './camera-backend.js';
 import { AiMoment } from './ai-moment.js';
 import { FacePulse } from './instant.js';
 import { store } from './store.js';
@@ -27,7 +27,7 @@ const TIP_HOLD_MS    = 650;   // 提示至少停留这么久，避免抖来抖�
 const DETECT_HZ      = 8;    // 关键点检测频率。再高对判断没帮助，只费电
 
 export class Coach {
-  constructor() {
+  constructor({ cameraBackend } = {}) {
     this.video    = $('#cam');
     this.overlay  = $('#overlay');
     this.octx     = this.overlay.getContext('2d');
@@ -35,9 +35,13 @@ export class Coach {
     this.reader   = new FrameReader();
     this.tracker  = new SubjectTracker();
     this.voice    = new Voice();
+    this.camera   = cameraBackend || new WebCameraBackend();
+    Object.defineProperty(this, 'stream', {
+      enumerable: true,
+      get: () => this.camera.stream,
+    });
 
-    this.stream   = null;
-    this.facing   = 'environment';
+    this.facing   = this.camera.facing || 'environment';
     this.running  = false;
     this.shotType = 'half';
     this.showGrid = store.prefs.grid !== false;
@@ -74,31 +78,23 @@ export class Coach {
   async start() {
     if (this.running) return true;
     if (this._starting) return false;
-    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    if (!this.camera.available) {
       this._fail('Open this page over HTTPS in a camera-enabled browser. On iPhone, use Safari.');
       return false;
     }
     const session = ++this._session;
     this._starting = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: this.facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: false,
+      const started = await this.camera.start(this.video, {
+        facing: this.facing,
+        onEnded: () => {
+          if (session !== this._session) return;
+          this.stop();
+          this._fail('Camera disconnected. Please open it again.');
+        },
       });
-      if (session !== this._session || document.hidden) {
-        stream.getTracks().forEach(t => t.stop());
-        return false;
-      }
-      this.stream = stream;
-      this.video.srcObject = stream;
-      this.video.style.transform = this.facing === 'user' ? 'scaleX(-1)' : '';
-      await this.video.play();
-      if (session !== this._session) return false;
-      stream.getVideoTracks()[0]?.addEventListener('ended', () => {
-        if (session !== this._session) return;
-        this.stop();
-        this._fail('Camera disconnected. Please open it again.');
-      });
+      if (!started || session !== this._session) return false;
+      this.facing = this.camera.facing;
       $('#camIdle').hidden = true;
       $('#camError').hidden = true;
       $('#hud').hidden = false;
@@ -149,9 +145,7 @@ export class Coach {
     this._frameSeenAt = -Infinity;
     this._sampleVideoTime = -1;
     this._detectVideoTime = -1;
-    this.stream?.getTracks().forEach(t => t.stop());
-    this.stream = null;
-    this.video.srcObject = null;
+    this.camera.stop();
     this.head = null;
     this.subjects = [];
     this.ready = false;
@@ -172,8 +166,8 @@ export class Coach {
   }
 
   async flip() {
-    this.facing = this.facing === 'environment' ? 'user' : 'environment';
     const wasRunning = this.running;
+    this.facing = this.camera.flip();
     this.stop();
     if (wasRunning) {
       const ok = await this.start();
@@ -291,7 +285,7 @@ export class Coach {
     const { w, h } = this._box;
     this.ai.invalidate();
     this.aiReady = false;
-    const shot = await captureFrame(this.video, w, h, this.facing === 'user');
+    const shot = await this.camera.capture({ width: w, height: h, mirror: this.facing === 'user' });
     this.gate.reset();
     this.ready = false;
     $('#cameraStage').classList.remove('is-ready');

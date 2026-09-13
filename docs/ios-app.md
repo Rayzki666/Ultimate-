@@ -42,3 +42,5 @@ The generated `ios/` folder is intentionally ignored during this first stage. Th
 5. **Distribution** — signed device build, TestFlight, privacy details, screenshots, and App Store review.
 
 A signed device or TestFlight build needs an Apple Developer Program team, bundle identifier, signing certificate, and provisioning profile. No signing credentials are required for the current simulator build. The browser build keeps its existing vibration fallback; the Capacitor bundle adds the native iOS Haptics plugin.
+
+The guidance controller now talks to a small camera backend interface. `WebCameraBackend` remains the default and owns `getUserMedia`, preview attachment, camera flipping, track shutdown and JPEG capture. Its session generation guard rejects delayed permission or playback results after stop/restart, so a stale request cannot reactivate the camera. This is the seam the later AVFoundation backend will implement.

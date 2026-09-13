@@ -34,11 +34,12 @@ Up to 20 photos are held in the page session. **Save photos before refreshing.**
 
 ## Deployment and updates
 
-No build step is required. Host the repository root over HTTPS. For GitHub Pages, keep the selected implementation branch as the source. After deployment, save session photos, then refresh Safari to load the latest app. Service-worker shell version: v12.
+No build step is required. Host the repository root over HTTPS. For GitHub Pages, keep the selected implementation branch as the source. After deployment, save session photos, then refresh Safari to load the latest app. Service-worker shell version: v13.
 
 ## Validation
 
 - `node --test tests/guidance.test.mjs`: geometry, readiness, preset behavior, environment-dependent hints, fallback and exposure priority.
+- `node --test tests/camera-backend.test.mjs`: browser camera lifecycle, track cleanup, capture delegation and stale-start rejection.
 - `tests/browser-smoke.cjs`: real bundled model load, style selection/persistence, English navigation, camera JPEG download and phone-sized layouts.
 - GitHub Actions runs these checks in the cloud. Synthetic video and injected observations are used for repeatable controller tests.
 - Real iPhone permission flows, speed, heat, image quality and download-to-Photos behavior still require device testing.
