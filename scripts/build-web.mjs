@@ -1,4 +1,5 @@
 import { access, cp, mkdir, rm } from 'node:fs/promises';
+import { build } from 'esbuild';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,4 +23,15 @@ for (const directory of directories) {
   await cp(source, join(output, directory), { recursive: true });
 }
 
-console.log(`Prepared Capacitor web assets in ${output}`);
+await build({
+  entryPoints: [join(root, 'js', 'app.js')],
+  outfile: join(output, 'js', 'app.js'),
+  bundle: true,
+  format: 'esm',
+  platform: 'browser',
+  target: ['safari15.5'],
+  sourcemap: true,
+  legalComments: 'none',
+});
+
+console.log(`Prepared and bundled Capacitor web assets in ${output}`);

@@ -19,6 +19,7 @@ import { captureFrame } from './capture.js';
 import { AiMoment } from './ai-moment.js';
 import { FacePulse } from './instant.js';
 import { store } from './store.js';
+import { signalShootReady } from './native.js';
 
 
 const ROLL_TOLERANCE = 2.4;   // 歪超过这个度数就提醒，2° 以上肉眼能看出来
@@ -566,6 +567,7 @@ export class Coach {
     if ((wasReady && !this.aiReady) || (old && old.key !== tip.key)) this.voice.stop();
     if (this.aiReady && !wasReady) {
       buzz([25, 45, 25]);
+      void signalShootReady();
       this.voice.say(tip.voice);
     } else if (!this.ready && (tip.sev === 'warn' || tip.sev === 'bad')) {
       this.voice.say(tip.voice);

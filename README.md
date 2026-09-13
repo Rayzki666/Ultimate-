@@ -34,7 +34,7 @@ Up to 20 photos are held in the page session. **Save photos before refreshing.**
 
 ## Deployment and updates
 
-No build step is required. Host the repository root over HTTPS. For GitHub Pages, keep the selected implementation branch as the source. After deployment, save session photos, then refresh Safari to load the latest app. Service-worker shell version: v11.
+No build step is required. Host the repository root over HTTPS. For GitHub Pages, keep the selected implementation branch as the source. After deployment, save session photos, then refresh Safari to load the latest app. Service-worker shell version: v12.
 
 ## Validation
 
@@ -50,7 +50,7 @@ A private gateway and explicit camera-session consent now enable recent scene/st
 
 ## iPhone app build
 
-The same interface can now be packaged as a native iOS application with Capacitor 8. The web files are collected into `dist/`, then a macOS GitHub Actions runner generates an Xcode project and builds an unsigned iPhone Simulator app. No Apple signing secret is stored in the repository.
+The same interface can now be packaged as a native iOS application with Capacitor 8. Native builds add an iOS haptic when AI readiness first changes to **SHOOT NOW**. The web files are collected into `dist/`, then a macOS GitHub Actions runner generates an Xcode project and builds an unsigned iPhone Simulator app. No Apple signing secret is stored in the repository.
 
 - Configuration: [`capacitor.config.json`](capacitor.config.json)
 - Build and native roadmap: [`docs/ios-app.md`](docs/ios-app.md)
