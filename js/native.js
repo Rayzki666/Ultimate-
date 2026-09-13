@@ -1,4 +1,4 @@
-let lastReadySignal = 0;
+const READY_COOLDOWN_MS = 1500;
 
 function nativeCapacitor() {
   const capacitor = globalThis.Capacitor;
@@ -7,18 +7,39 @@ function nativeCapacitor() {
   return typeof capacitor.getPlatform === 'function' && capacitor.getPlatform() !== 'web';
 }
 
-export async function signalShootReady() {
-  if (!nativeCapacitor()) return false;
-
-  const now = Date.now();
-  if (now - lastReadySignal < 1500) return false;
-  lastReadySignal = now;
-
-  try {
-    const { Haptics, ImpactStyle } = await import('@capacitor/haptics');
-    await Haptics.impact({ style: ImpactStyle.Medium });
-    return true;
-  } catch {
-    return false;
-  }
+async function nativeImpact() {
+  const { Haptics, ImpactStyle } = await import('@capacitor/haptics');
+  await Haptics.impact({ style: ImpactStyle.Medium });
 }
+
+function nativeDebugEnabled() {
+  return globalThis.__FRAME_DEBUG_NATIVE__ === true;
+}
+
+export function createShootReadySignal({
+  isNative = nativeCapacitor,
+  now = () => Date.now(),
+  impact = nativeImpact,
+  cooldownMs = READY_COOLDOWN_MS,
+  debug = nativeDebugEnabled,
+} = {}) {
+  let lastReadySignal = Number.NEGATIVE_INFINITY;
+
+  return async function shootReadySignal() {
+    if (!isNative()) return false;
+
+    const currentTime = now();
+    if (currentTime - lastReadySignal < cooldownMs) return false;
+    lastReadySignal = currentTime;
+
+    try {
+      await impact();
+      return true;
+    } catch (error) {
+      if (debug()) console.debug('[Frame native] Shoot-ready haptic unavailable.', error);
+      return false;
+    }
+  };
+}
+
+export const signalShootReady = createShootReadySignal();
