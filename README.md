@@ -34,27 +34,35 @@ Up to 20 photos are held in the page session. **Save photos before refreshing.**
 
 ## Deployment and updates
 
-No build step is required. Host the repository root over HTTPS. For GitHub Pages, keep the selected implementation branch as the source. After deployment, save session photos, then refresh Safari to load the latest app. Service-worker shell version: v13.
+No build step is required for GitHub Pages. Host the repository root over HTTPS and keep the selected implementation branch as the Pages source. After deployment, save session photos, then refresh Safari to load the latest app. Service-worker shell version: v13.
 
 ## Validation
 
 - `node --test tests/guidance.test.mjs`: geometry, readiness, preset behavior, environment-dependent hints, fallback and exposure priority.
 - `node --test tests/camera-backend.test.mjs`: browser camera lifecycle, track cleanup, capture delegation and stale-start rejection.
-- `tests/browser-smoke.cjs`: real bundled model load, style selection/persistence, English navigation, camera JPEG download and phone-sized layouts.
-- GitHub Actions runs these checks in the cloud. Synthetic video and injected observations are used for repeatable controller tests.
+- `node --test tests/native*.test.mjs`: native haptics and camera-adapter fallbacks, throttling, permissions and capability metadata.
+- `tests/browser-smoke.cjs`: bundled model load, style selection, English navigation, camera JPEG download and phone-sized layouts.
+- GitHub Actions also compiles both the iPhone Simulator and unsigned arm64 iPhone app, verifies the IPA structure, and uploads build artifacts.
 - Real iPhone permission flows, speed, heat, image quality and download-to-Photos behavior still require device testing.
-
 
 ## Optional live AI suggestions
 
-A private gateway and explicit camera-session consent now enable recent scene/style advice. Basic checks and AI shoot suggestions have distinct signals; missing or stale AI results do not turn the AI indicator green. Flexible poses replace the universal lowered-hands rule. The camera now fills the shooting stage while secondary framing choices stay in a compact drawer. The gateway requires deployment and server-side provider credentials before cloud analysis is usable. See [setup, limits and verification](docs/live-ai-setup.md).
+A private gateway and explicit camera-session consent enable recent scene/style advice. Basic checks and AI shoot suggestions have distinct signals; missing or stale AI results do not turn the AI indicator green. Flexible poses replace the universal lowered-hands rule. The camera fills the shooting stage while secondary framing choices stay in a compact drawer. The gateway requires deployment and server-side provider credentials before cloud analysis is usable. See [setup, limits and verification](docs/live-ai-setup.md).
 
 ## iPhone app build
 
-The same interface can now be packaged as a native iOS application with Capacitor 8. Native builds add an iOS haptic when AI readiness first changes to **SHOOT NOW**. A default-off local plugin provides truthful camera availability and permission probes for the next native stage; web video remains the active camera backend. The web files are collected into `dist/`, then a macOS GitHub Actions runner generates an Xcode project and builds an unsigned iPhone Simulator app. No Apple signing secret is stored in the repository.
+Capacitor 8 packages the same interface as an iOS app. Native builds add a haptic when AI readiness first changes to **SHOOT NOW**. A local Swift plugin provides camera availability and permission probes for the next native stage; web video remains the active camera backend.
+
+The macOS GitHub Actions workflow produces:
+
+- `Frame-iOS-Simulator.zip`;
+- `Frame-iOS-Unsigned.ipa` for arm64 iPhones;
+- a SHA-256 checksum; and
+- the generated Xcode source.
+
+The unsigned IPA can be signed and installed from Windows with a free Apple Account. Free provisioning expires after seven days; TestFlight and App Store distribution require the paid program. No Apple credentials or signing secrets are stored in this repository. See [the iPhone build and sideload guide](docs/ios-app.md).
 
 - Configuration: [`capacitor.config.json`](capacitor.config.json)
-- Build and native roadmap: [`docs/ios-app.md`](docs/ios-app.md)
-- Cloud build: [`.github/workflows/ios-build.yml`](.github/workflows/ios-build.yml)
+- Build workflow: [`.github/workflows/ios-build.yml`](.github/workflows/ios-build.yml)
 
-The current bundle identifier, `com.rayzki.framecamera`, is provisional until the App Store identity is chosen.
+The bundle identifier `com.rayzki.framecamera` is provisional for App Store distribution but should stay unchanged between sideload refreshes.

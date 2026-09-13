@@ -1,4 +1,4 @@
-name: iOS simulator build
+name: iOS build artifacts
 
 on:
   push:
@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ios-simulator:
+  ios-build:
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -54,22 +54,53 @@ jobs:
             -configuration Debug \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build/DerivedData \
+            -derivedDataPath build/SimulatorDerivedData \
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Package simulator app and generated source
+      - name: Build unsigned iPhone device app
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DeviceDerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package simulator, unsigned IPA and generated source
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
-            build/DerivedData/Build/Products/Debug-iphonesimulator/App.app \
+            build/SimulatorDerivedData/Build/Products/Debug-iphonesimulator/App.app \
             build/Frame-iOS-Simulator.zip
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          ditto \
+            build/DeviceDerivedData/Build/Products/Debug-iphoneos/App.app \
+            build/Payload/App.app
+          (cd build && /usr/bin/zip -qry Frame-iOS-Unsigned.ipa Payload)
+          rm -rf build/Payload
+          shasum -a 256 build/Frame-iOS-Unsigned.ipa > build/Frame-iOS-Unsigned.ipa.sha256
           ditto -c -k --sequesterRsrc --keepParent ios build/Frame-iOS-Source.zip
+
+      - name: Verify unsigned device IPA
+        run: |
+          /usr/bin/file build/DeviceDerivedData/Build/Products/Debug-iphoneos/App.app/App | grep -Fq arm64
+          unzip -tq build/Frame-iOS-Unsigned.ipa
+          unzip -Z1 build/Frame-iOS-Unsigned.ipa | grep -Fq 'Payload/App.app/Info.plist'
+          shasum -a 256 -c build/Frame-iOS-Unsigned.ipa.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: frame-ios-simulator
+          name: frame-ios-builds
           path: |
             build/Frame-iOS-Simulator.zip
+            build/Frame-iOS-Unsigned.ipa
+            build/Frame-iOS-Unsigned.ipa.sha256
             build/Frame-iOS-Source.zip
           if-no-files-found: error
           retention-days: 14
