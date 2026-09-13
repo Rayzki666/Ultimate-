@@ -40,6 +40,12 @@ jobs:
           npx cap sync ios
           node scripts/configure-ios.mjs
 
+      - name: Verify local camera plugin discovery
+        run: |
+          grep -Fq '.package(name: "FrameCamera"' ios/App/CapApp-SPM/Package.swift
+          grep -Fq '.product(name: "FrameCamera"' ios/App/CapApp-SPM/Package.swift
+          grep -Fq '"FrameCameraPlugin"' ios/App/App/capacitor.config.json
+
       - name: Build unsigned simulator app
         run: |
           xcodebuild \

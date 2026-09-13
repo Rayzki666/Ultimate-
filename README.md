@@ -51,7 +51,7 @@ A private gateway and explicit camera-session consent now enable recent scene/st
 
 ## iPhone app build
 
-The same interface can now be packaged as a native iOS application with Capacitor 8. Native builds add an iOS haptic when AI readiness first changes to **SHOOT NOW**. The web files are collected into `dist/`, then a macOS GitHub Actions runner generates an Xcode project and builds an unsigned iPhone Simulator app. No Apple signing secret is stored in the repository.
+The same interface can now be packaged as a native iOS application with Capacitor 8. Native builds add an iOS haptic when AI readiness first changes to **SHOOT NOW**. A default-off local plugin provides truthful camera availability and permission probes for the next native stage; web video remains the active camera backend. The web files are collected into `dist/`, then a macOS GitHub Actions runner generates an Xcode project and builds an unsigned iPhone Simulator app. No Apple signing secret is stored in the repository.
 
 - Configuration: [`capacitor.config.json`](capacitor.config.json)
 - Build and native roadmap: [`docs/ios-app.md`](docs/ios-app.md)

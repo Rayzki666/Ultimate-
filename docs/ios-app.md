@@ -4,7 +4,7 @@ Frame is moving from a browser-only PWA to a Capacitor iOS app in small, testabl
 
 ## Current stage
 
-The repository now has a reproducible Capacitor 8 configuration and a native shoot-ready haptic adapter. GitHub Actions uses a macOS runner to:
+The repository now has a reproducible Capacitor 8 configuration and a native shoot-ready haptic adapter. It also contains a local Swift Package plugin shell that reports camera hardware availability and reads or requests iOS video permission. GitHub Actions uses a macOS runner to:
 
 1. run the existing guidance tests;
 2. collect the current web app into `dist/`;
@@ -37,10 +37,17 @@ The generated `ios/` folder is intentionally ignored during this first stage. Th
 
 1. **Capacitor shell** — reproducible simulator build and camera permission.
 2. **Native feedback** — haptic confirmation when Frame recommends shooting. Implemented; physical-device feel still needs verification.
-3. **Native camera** — AVFoundation preview, high-resolution capture, focus, exposure, lens switching, and Photo Library save.
-4. **On-device vision** — Vision/Core ML scene signals feeding the existing readiness system.
-5. **Distribution** — signed device build, TestFlight, privacy details, screenshots, and App Store review.
+3. **Native permission shell** — local Capacitor plugin discovery, camera capability metadata and explicit video permission request. Implemented and default-off.
+4. **Native camera** — AVFoundation preview, high-resolution capture, focus, exposure, lens switching, and Photo Library save.
+5. **On-device vision** — Vision/Core ML scene signals feeding the existing readiness system.
+6. **Distribution** — signed device build, TestFlight, privacy details, screenshots, and App Store review.
 
 A signed device or TestFlight build needs an Apple Developer Program team, bundle identifier, signing certificate, and provisioning profile. No signing credentials are required for the current simulator build. The browser build keeps its existing vibration fallback; the Capacitor bundle adds the native iOS Haptics plugin.
 
 The guidance controller now talks to a small camera backend interface. `WebCameraBackend` remains the default and owns `getUserMedia`, preview attachment, camera flipping, track shutdown and JPEG capture. Its session generation guard rejects delayed permission or playback results after stop/restart, so a stale request cannot reactivate the camera. This is the seam the later AVFoundation backend will implement.
+
+## Native camera plugin shell
+
+`@frame/camera` is linked from `plugins/frame-camera` during `npm ci`. The iOS workflow verifies that Capacitor writes both the `FrameCamera` Swift Package product and `FrameCameraPlugin` registration into the generated project before Xcode builds it.
+
+The app still creates `WebCameraBackend`. The adapter in `js/native-camera.js` is not imported by the active camera controller and its default instance is disabled. Even an explicitly enabled adapter exposes only `getAvailability`, `authorizationStatus` and `requestPermissions`; it cannot start a native preview or take a native photo.
