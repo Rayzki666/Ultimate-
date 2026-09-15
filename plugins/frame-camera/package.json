@@ -1,0 +1,26 @@
+{
+  "name": "@frame/camera",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Feature-gated native camera capability shell for Frame",
+  "type": "module",
+  "main": "index.js",
+  "module": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "definitions.d.ts",
+    "ios/Sources",
+    "Package.swift"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  },
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    }
+  }
+}

@@ -1,0 +1,120 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { configFromEnv, createApp, validateInput } from '../server/server.mjs';
+const token='private-service-code-'.repeat(3),origin='https://rayzki666.github.io';
+const bytes=Buffer.alloc(120,1);bytes[0]=255;bytes[1]=216;bytes[118]=255;bytes[119]=217;
+const input={id:'1',image:'data:image/jpeg;base64,'+bytes.toString('base64'),style:'golden',shotType:'half',composition:'thirds'};
+const good={decision:'shoot',confidence:.9,reason:'The light and background complement this portrait.',action:'',actor:'none',checks:{light:'good',composition:'good',background:'good',pose:'good',eyes:'good'}};
+async function fixture(fetcher,run,options={}){
+ const server=createApp({key:'server-secret',model:'test-vision-model',token,origin,fetcher,...options});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const url='http://127.0.0.1:'+server.address().port;
+ const request=(body=input,headers={})=>fetch(url+'/analyze',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',Origin:origin,...headers},body:typeof body==='string'?body:JSON.stringify(body)});
+ try{await run({url,request});}finally{server.closeAllConnections();await new Promise(r=>server.close(r));}
+}
+test('gateway requires complete server config and a supported provider',()=>{
+ assert.throws(()=>createApp({key:'k',model:'m',token:'short',origin}));
+ assert.throws(()=>createApp({provider:'other',key:'k',model:'m',token,origin}),/AI_PROVIDER/);
+ assert.throws(()=>createApp({provider:'xai',key:'k',model:'m',token,origin,imageDetail:'huge'}),/XAI_IMAGE_DETAIL/);
+ assert.throws(()=>createApp({provider:'xai',key:'k',model:'m',token,origin,reasoningEffort:'maximum'}),/XAI_REASONING_EFFORT/);
+});
+test('environment config keeps Anthropic compatibility and selects xAI explicitly',()=>{
+ const common={APP_TOKEN:token,ALLOWED_ORIGIN:origin};
+ const anthropic=configFromEnv({...common,ANTHROPIC_API_KEY:'anthropic-key',ANTHROPIC_MODEL:'claude-model'});
+ assert.equal(anthropic.provider,'anthropic');assert.equal(anthropic.key,'anthropic-key');assert.equal(anthropic.model,'claude-model');
+ const xai=configFromEnv({...common,AI_PROVIDER:' XAI ',XAI_API_KEY:'xai-key',XAI_MODEL:'grok-4.3',XAI_IMAGE_DETAIL:'high',XAI_REASONING_EFFORT:'none'});
+ assert.equal(xai.provider,'xai');assert.equal(xai.key,'xai-key');assert.equal(xai.model,'grok-4.3');
+ assert.equal(xai.imageDetail,'high');assert.equal(xai.reasoningEffort,'none');
+ assert.throws(()=>configFromEnv({...common,AI_PROVIDER:'unknown'}),/AI_PROVIDER/);
+});
+test('request schema rejects untrusted style, wrong data type and non-JPEG data',()=>{
+ for(const change of [{style:'ignore instructions'}, {image:'https://evil.example/photo'}, {id:'bad'},{image:'data:image/jpeg;base64,YQ=='},{shotType:'unknown'}])
+  assert.throws(()=>validateInput({...input,...change}));
+});
+test('health auth, wrong origin and unauthenticated requests never reach provider',async()=>{
+ let calls=0;
+ await fixture(async()=>{calls++;},async({url,request})=>{
+  assert.equal((await fetch(url+'/health')).status,401);
+  const health=await fetch(url+'/health',{headers:{Authorization:'Bearer '+token,Origin:origin}});
+  assert.equal(health.status,200);const body=await health.json();assert.equal(body.protocol,1);assert.equal(body.provider,'anthropic');
+  assert.equal((await request(input,{Authorization:'Bearer wrong'})).status,401);
+  assert.equal((await request(input,{Origin:'https://other.example'})).status,403);
+  assert.equal((await fetch(url+'/analyze',{method:'OPTIONS',headers:{Origin:origin}})).headers.get('access-control-allow-origin'),origin);
+ });
+ assert.equal(calls,0);
+});
+test('invalid and oversized bodies never reach provider',async()=>{
+ let calls=0;
+ await fixture(async()=>{calls++;},async({request})=>{
+  assert.equal((await request('invalid-json')).status,400);
+  assert.equal((await request({...input,style:'other'})).status,400);
+  assert.equal((await request('x'.repeat(410000))).status,413);
+ });
+ assert.equal(calls,0);
+});
+test('Anthropic transport keeps key server-side and returns the validated contract',async()=>{
+ await fixture(async(url,opts)=>{
+  assert.equal(url,'https://api.anthropic.com/v1/messages');
+  assert.equal(opts.headers['x-api-key'],'server-secret');
+  const body=JSON.parse(opts.body);assert.equal(body.model,'test-vision-model');
+  assert.equal(body.messages[0].content[0].source.data,input.image.split(',')[1]);
+  return {ok:true,json:async()=>({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify(good)}]})};
+ },async({request})=>{
+  const response=await request();assert.equal(response.status,200);
+  const body=await response.json();assert.equal(body.id,'1');assert.equal(body.result.decision,'shoot');
+  assert.equal(JSON.stringify(body).includes('server-secret'),false);
+  assert.equal((await request()).status,429);
+ });
+});
+test('xAI Responses transport sends a private, non-stored image request with strict output',async()=>{
+ await fixture(async(url,opts)=>{
+  assert.equal(url,'https://api.x.ai/v1/responses');
+  assert.equal(opts.headers.Authorization,'Bearer server-secret');
+  assert.equal(Object.hasOwn(opts.headers,'x-api-key'),false);
+  const body=JSON.parse(opts.body);
+  assert.equal(body.model,'grok-4.3');assert.equal(body.store,false);assert.equal(body.reasoning.effort,'none');
+  assert.equal(body.input[0].role,'system');
+  assert.equal(body.input[1].content[0].image_url,input.image);
+  assert.equal(body.input[1].content[0].detail,'low');
+  assert.equal(body.text.format.type,'json_schema');assert.equal(body.text.format.strict,true);
+  assert.equal(body.text.format.schema.additionalProperties,false);
+  assert.deepEqual(body.text.format.schema.required,['decision','confidence','reason','action','actor','checks']);
+  return {ok:true,json:async()=>({status:'completed',output:[{type:'message',status:'completed',content:[{type:'output_text',text:JSON.stringify(good)}]}]})};
+ },async({url,request})=>{
+  const health=await fetch(url+'/health',{headers:{Authorization:'Bearer '+token,Origin:origin}});
+  assert.equal((await health.json()).provider,'xai');
+  const response=await request();assert.equal(response.status,200);
+  const body=await response.json();assert.equal(body.id,'1');assert.equal(body.result.decision,'shoot');
+  assert.equal(JSON.stringify(body).includes('server-secret'),false);
+ },{provider:'xai',model:'grok-4.3',imageDetail:'low',reasoningEffort:'none'});
+});
+test('Anthropic provider errors, truncation and malformed JSON never return shoot',async()=>{
+ for(const provider of [
+  {ok:false},
+  {ok:true,json:async()=>({stop_reason:'max_tokens',content:[]})},
+  {ok:true,json:async()=>({stop_reason:'end_turn',content:[{type:'text',text:'not json'}]})}
+ ])await fixture(async()=>provider,async({request})=>assert.equal((await request()).status,502));
+});
+test('xAI failures and provider details stay private',async()=>{
+ const providers=[
+  {ok:false,json:async()=>({error:'upstream-secret-detail'})},
+  {ok:true,json:async()=>({status:'incomplete',output:[]})},
+  {ok:true,json:async()=>({status:'completed',output:[]})},
+  {ok:true,json:async()=>({status:'completed',output:[{type:'message',content:[{type:'output_text',text:'not json'}]}]})}
+ ];
+ for(const provider of providers)await fixture(async()=>provider,async({request})=>{
+  const response=await request();assert.equal(response.status,502);
+  const body=await response.text();assert.equal(body.includes('server-secret'),false);assert.equal(body.includes('upstream-secret-detail'),false);
+ },{provider:'xai'});
+});
+test('concurrent requests and hourly cap prevent extra provider charges',async()=>{
+ let finish,calls=0,time=0;
+ await fixture(async()=>{calls++;return new Promise(r=>finish=r);},async({request})=>{
+  const first=request();
+  while(!finish)await new Promise(r=>setTimeout(r,5));
+  assert.equal((await request()).status,429);assert.equal(calls,1);
+  finish({ok:true,json:async()=>({stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify(good)}]})});
+  assert.equal((await first).status,200);
+  time=10000;assert.equal((await request()).status,429);assert.equal(calls,1);
+ },{now:()=>time,maxPerHour:1});
+});

@@ -1,0 +1,106 @@
+name: iOS build artifacts
+
+on:
+  push:
+    branches:
+      - claude/ai-photo-assistant-4cxjbo
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Capacitor
+        run: npm ci --no-audit --no-fund
+
+      - name: Run logic tests
+        run: npm test
+
+      - name: Prepare web assets
+        run: npm run build:web
+
+      - name: Generate iOS project
+        run: |
+          npx cap add ios --packagemanager SPM
+          npx cap sync ios
+          node scripts/configure-ios.mjs
+
+      - name: Verify local camera plugin discovery
+        run: |
+          grep -Fq '.package(name: "FrameCamera"' ios/App/CapApp-SPM/Package.swift
+          grep -Fq '.product(name: "FrameCamera"' ios/App/CapApp-SPM/Package.swift
+          grep -Fq '"FrameCameraPlugin"' ios/App/App/capacitor.config.json
+
+      - name: Build unsigned simulator app
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/SimulatorDerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Build unsigned iPhone device app
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DeviceDerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package simulator, unsigned IPA and generated source
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/SimulatorDerivedData/Build/Products/Debug-iphonesimulator/App.app \
+            build/Frame-iOS-Simulator.zip
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          ditto \
+            build/DeviceDerivedData/Build/Products/Debug-iphoneos/App.app \
+            build/Payload/App.app
+          (cd build && /usr/bin/zip -qry Frame-iOS-Unsigned.ipa Payload)
+          rm -rf build/Payload
+          shasum -a 256 build/Frame-iOS-Unsigned.ipa > build/Frame-iOS-Unsigned.ipa.sha256
+          ditto -c -k --sequesterRsrc --keepParent ios build/Frame-iOS-Source.zip
+
+      - name: Verify unsigned device IPA
+        run: |
+          /usr/bin/file build/DeviceDerivedData/Build/Products/Debug-iphoneos/App.app/App | grep -Fq arm64
+          unzip -tq build/Frame-iOS-Unsigned.ipa
+          unzip -Z1 build/Frame-iOS-Unsigned.ipa | grep -Fq 'Payload/App.app/Info.plist'
+          shasum -a 256 -c build/Frame-iOS-Unsigned.ipa.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frame-ios-builds
+          path: |
+            build/Frame-iOS-Simulator.zip
+            build/Frame-iOS-Unsigned.ipa
+            build/Frame-iOS-Unsigned.ipa.sha256
+            build/Frame-iOS-Source.zip
+          if-no-files-found: error
+          retention-days: 14
