@@ -1,25 +1,25 @@
 import { MomentGate, endpointURL } from './ai-contract.mjs';
 export class AiMoment {
   constructor({fetcher=(...args)=>fetch(...args),clock=()=>performance.now()}={}) {
-    this.fetcher=fetcher;this.clock=clock;this.gate=new MomentGate();this.enabled=false;this.endpoint='';this.token='';
+    this.fetcher=fetcher;this.clock=clock;this.gate=new MomentGate();this.enabled=false;this.endpoint='';this.token='';this.provider='';
     this.status='off';this.serial=0;this.inFlight=null;this.lastAttempt=-Infinity;this.count=0;this.errors=0;
   }
   async connect(endpoint,token) {
-    this.disable();this.endpoint='';this.token='';
+    this.disable();this.endpoint='';this.token='';this.provider='';
     const origin=endpointURL(endpoint);
     if(typeof token!=='string'||token.length<32||token.length>256||/[\r\n]/.test(token))throw Error('Enter the service access code (at least 32 characters).');
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),6000);
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
     try{
       const r=await this.fetcher(origin+'/health',{headers:{Authorization:'Bearer '+token},signal:controller.signal,cache:'no-store',credentials:'omit'});
       if(!r.ok)throw Error('Service connection failed. Check the address and access code.');
       const data=await r.json();if(data.status!=='ready'||data.protocol!==1)throw Error('This service is not ready for live guidance.');
-      this.endpoint=origin;this.token=token;this.status='connected';
+      this.endpoint=origin;this.token=token;this.provider=['anthropic','xai'].includes(data.provider)?data.provider:'';this.status='connected';
     }finally{clearTimeout(timer);}
   }
   enable(){if(!this.endpoint||!this.token)throw Error('Connect your AI service in Settings first.');this.invalidate();this.enabled=true;this.status='waiting';this.lastAttempt=-Infinity;this.count=0;this.errors=0;}
   invalidate(){++this.serial;this.gate.invalidate();this.inFlight?.controller.abort();}
   disable(){this.enabled=false;this.invalidate();this.status=this.endpoint?'connected':'off';}
-  disconnect(){this.disable();this.endpoint='';this.token='';this.status='off';}
+  disconnect(){this.disable();this.endpoint='';this.token='';this.provider='';this.status='off';}
   observe(scene,now){if(this.gate.request&&!this.gate.observe(scene,now)){++this.serial;this.inFlight?.controller.abort();}}
   async analyze(scene,image,context) {
     const now=this.clock();

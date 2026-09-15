@@ -34,7 +34,7 @@ const server = http.createServer((req, res) => {
     await page.route('https://frame-ai.test/**', async route => {
       if(route.request().method()==='OPTIONS')return route.fulfill({status:204,headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'Authorization, Content-Type','Access-Control-Allow-Methods':'GET, POST, OPTIONS'}});
       const headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};
-      if(route.request().url().endsWith('/health'))return route.fulfill({headers,body:JSON.stringify({status:'ready',protocol:1})});
+      if(route.request().url().endsWith('/health'))return route.fulfill({headers,body:JSON.stringify({status:'ready',protocol:1,provider:'xai'})});
       aiCalls++;
       const body=route.request().postDataJSON();
       assert.match(body.image,/^data:image\/jpeg;base64,/);
@@ -128,7 +128,7 @@ const server = http.createServer((req, res) => {
     await page.fill('#aiEndpoint','https://frame-ai.test');
     await page.fill('#aiAccessCode','private-access-code-for-camera-tests-123');
     await page.click('#connectAI');
-    await page.waitForFunction(()=>document.querySelector('#aiConnectionStatus').textContent.startsWith('Connected.'));
+    await page.waitForFunction(()=>document.querySelector('#aiConnectionStatus').textContent.startsWith('Connected to Grok.'));
     assert.equal(await page.locator('#aiAccessCode').inputValue(),'');
     await page.click('[data-go="coach"]');
     await page.click('#startCam');

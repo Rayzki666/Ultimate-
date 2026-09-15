@@ -96,12 +96,12 @@
   <header class="vh"><p class="eyebrow">MAKE IT YOURS</p><h1>Settings</h1><p class="sub">Simple controls. Clear choices.</p></header>
   <div class="settings">
     <details open><summary>Live AI guidance</summary><div class="settings-body">
-      <p class="fine">Connect your private Frame AI service. Your model API key stays on that server. Enable AI separately in the camera to share small previews with the service and Anthropic. Charges may apply.</p>
+      <p class="fine">Connect your private Frame AI service. Your model API key stays on that server. Enable AI separately in the camera to share small previews with the service and its configured AI provider, including xAI Grok. Charges may apply.</p>
       <label class="field"><span>Service address</span><input type="url" id="aiEndpoint" placeholder="https://your-service.example" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       <label class="field"><span>Service access code</span><input type="password" id="aiAccessCode" autocomplete="off" placeholder="Your private service code"></label>
       <div class="row"><button class="btn btn-primary" id="connectAI">Connect service</button><button class="btn btn-ghost" id="disconnectAI">Disconnect</button></div>
       <p id="aiConnectionStatus" class="key-status" role="status">No service connected. Basic guidance is available.</p>
-      <p class="fine">The access code stays in memory until you close or reload this page. <a href="./docs/live-ai-setup.md" target="_blank" rel="noopener">Service setup guide</a></p>
+      <p class="fine">The access code stays in memory until you close or reload this page. Never paste a Grok or Anthropic API key into either field. <a href="./docs/live-ai-setup.md" target="_blank" rel="noopener">Service setup guide</a></p>
     </div></details>
     <details><summary>Optional AI photo review</summary><div class="settings-body">
       <p class="fine">Add your own Anthropic API key to request a photo review. Only the photos you choose to review are sent to Anthropic. Basic live guidance stays on this device; optional cloud guidance has its own connection and consent. Provider charges may apply.</p>
@@ -121,7 +121,7 @@
 <dialog id="exampleDialog" class="example-dialog" aria-labelledby="exampleTitle"><div class="example-top"><h2 id="exampleTitle">Style example</h2><button class="btn" id="closeExample" aria-label="Close example">Close ✕</button></div><img id="exampleImage" alt=""><p id="exampleDescription"></p><p class="fine">AI-generated example. Lighting and composition inspiration; not an exact pose or filter match.</p></dialog>
 <dialog id="aiConsent" class="example-dialog" aria-labelledby="aiConsentTitle">
   <h2 id="aiConsentTitle">Enable live AI guidance?</h2>
-  <p>Small camera previews will be sent to <strong id="aiDestination"></strong> and Anthropic to assess this scene and your selected style.</p>
+  <p>Small camera previews will be sent to <strong id="aiDestination"></strong> and its configured AI provider to assess this scene and your selected style.</p>
   <p class="fine">Up to one preview every 5 seconds, with a maximum of 60 previews per session. No microphone audio is sent. Face-detail and facial-change checks run on your device. Provider charges may apply. Closing the camera stops sharing.</p>
   <div class="row"><button class="btn btn-primary" id="confirmAI">Enable for this session</button><button class="btn btn-ghost" id="cancelAI">Cancel</button></div>
 </dialog>

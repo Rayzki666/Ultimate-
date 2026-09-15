@@ -175,7 +175,8 @@ $('#connectAI').addEventListener('click', async e => {
     await coach.ai.connect($('#aiEndpoint').value.trim(), $('#aiAccessCode').value.trim());
     $('#aiAccessCode').value='';
     try { localStorage.setItem('frame:aiEndpoint',coach.ai.endpoint); } catch {}
-    aiConnectionStatus('Connected. Open the camera and tap AI to enable sharing for this session.');
+    const providerName=coach.ai.provider==='xai'?'Grok':coach.ai.provider==='anthropic'?'Anthropic':'';
+    aiConnectionStatus(providerName?'Connected to '+providerName+'. Open the camera and tap AI to enable sharing for this session.':'Connected. Open the camera and tap AI to enable sharing for this session.');
   } catch(error) { aiConnectionStatus(error.message || 'Unable to connect. Check the service settings.'); }
   finally {button.disabled=false;}
 });

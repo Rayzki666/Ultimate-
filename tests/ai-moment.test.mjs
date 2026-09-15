@@ -18,6 +18,13 @@ test('service address rejects credentials, paths and insecure remote hosts',()=>
   assert.equal(endpointURL('http://127.0.0.1:8000'),'http://127.0.0.1:8000');
   for(const url of ['http://camera.example','https://user:pass@camera.example','https://camera.example/path','https://camera.example/?secret=1','javascript:alert(1)'])assert.throws(()=>endpointURL(url));
 });
+test('client records the provider reported by an authenticated gateway',async()=>{
+  let requested='';
+  const a=new AiMoment({fetcher:async(url,options)=>{requested=url;assert.equal(options.headers.Authorization,'Bearer '+('a'.repeat(32)));return {ok:true,json:async()=>({status:'ready',protocol:1,provider:'xai'})};}});
+  await a.connect('https://camera.example','a'.repeat(32));
+  assert.equal(requested,'https://camera.example/health');assert.equal(a.provider,'xai');assert.equal(a.status,'connected');
+  a.disconnect();assert.equal(a.provider,'');assert.equal(a.endpoint,'');
+});
 test('AI signal requires recent semantic approval AND continuous good local checks',()=>{
   const g=accepted();
   assert.equal(update(g,100).ready,false);

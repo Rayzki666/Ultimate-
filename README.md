@@ -30,11 +30,11 @@ Styles use only measured signals. Background objects, expressions, actual focus 
 
 The web shutter saves a JPEG of the visible video crop, including the front-camera mirror and excluding guides. It does not provide native camera HDR or full sensor resolution. Use Native camera when needed.
 
-Up to 20 photos are held in the page session. **Save photos before refreshing.** Live guidance does not upload frames. Optional photo review sends only explicitly selected photos to Anthropic using the user's own key; provider fees may apply. The key is stored in this browser. This personal-key setup is not a multi-user backend.
+Up to 20 photos are held in the page session. **Save photos before refreshing.** Basic on-device guidance does not upload frames. Live AI guidance sends small previews only after explicit camera-session consent, through the private gateway to its configured provider. Optional photo review sends only explicitly selected photos to Anthropic using the user's own key; provider fees may apply. The key is stored in this browser. This personal-key setup is not a multi-user backend.
 
 ## Deployment and updates
 
-No build step is required for GitHub Pages. Host the repository root over HTTPS and keep the selected implementation branch as the Pages source. After deployment, save session photos, then refresh Safari to load the latest app. Service-worker shell version: v13.
+No build step is required for GitHub Pages. Host the repository root over HTTPS and keep the selected implementation branch as the Pages source. After deployment, save session photos, then refresh Safari to load the latest app. Service-worker shell version: v14.
 
 ## Validation
 
@@ -47,7 +47,9 @@ No build step is required for GitHub Pages. Host the repository root over HTTPS 
 
 ## Optional live AI suggestions
 
-A private gateway and explicit camera-session consent enable recent scene/style advice. Basic checks and AI shoot suggestions have distinct signals; missing or stale AI results do not turn the AI indicator green. Flexible poses replace the universal lowered-hands rule. The camera fills the shooting stage while secondary framing choices stay in a compact drawer. The gateway requires deployment and server-side provider credentials before cloud analysis is usable. See [setup, limits and verification](docs/live-ai-setup.md).
+A private gateway and explicit camera-session consent enable recent scene/style advice. Basic checks and AI shoot suggestions have distinct signals; missing or stale AI results do not turn the AI indicator green. Flexible poses replace the universal lowered-hands rule. The camera fills the shooting stage while secondary framing choices stay in a compact drawer. The private gateway supports xAI Grok or Anthropic and requires server-side provider credentials before cloud analysis is usable. A Render Blueprint provides the quickest phone-only Grok setup. See [setup, limits and verification](docs/live-ai-setup.md).
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Rayzki666/Ultimate-/tree/claude/ai-photo-assistant-4cxjbo)
 
 ## iPhone app build
 
